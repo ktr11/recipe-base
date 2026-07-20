@@ -30,5 +30,6 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "//": "amplify/ は独自の tsconfig を持つ（$amplify/* のパス解決が必要）。ここに含めるとフロントエンドのビルドが Lambda のコードを型検査しようとして失敗する。検証は tsc -p amplify/tsconfig.json で行う。",
+  "exclude": ["node_modules", "amplify"]
 }
