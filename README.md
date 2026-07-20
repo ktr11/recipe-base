@@ -24,16 +24,20 @@
 
 ## セットアップ
 
-前提: Node.js 20 以上、AWS 認証情報が設定済みであること（`aws sts get-caller-identity` で確認できる）。
+前提: Node.js 20 以上、pnpm、AWS 認証情報が設定済みであること
+（`aws sts get-caller-identity` で確認できる）。
 
 ```bash
-npm install
+pnpm install
 ```
+
+パッケージマネージャーは **pnpm** に固定している（`package.json` の `packageManager`）。
+npm や yarn は使わないこと。
 
 ### バックエンド（開発用サンドボックス）
 
 ```bash
-npx ampx sandbox
+pnpm exec ampx sandbox
 ```
 
 自分専用の AWS 環境にバックエンドをデプロイし、接続情報を `amplify_outputs.json` に
@@ -45,7 +49,7 @@ npx ampx sandbox
 別のターミナルで:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 http://localhost:3000 で起動する。
@@ -54,11 +58,11 @@ http://localhost:3000 で起動する。
 
 | コマンド | 内容 |
 |---|---|
-| `npm run dev` | 開発サーバーを起動 |
-| `npm run build` | 本番ビルド（TypeScript の型検査を含む） |
-| `npm run lint` | ESLint |
-| `npx ampx sandbox` | バックエンドをサンドボックス環境へデプロイ |
-| `npx ampx sandbox delete` | サンドボックス環境を削除 |
+| `pnpm dev` | 開発サーバーを起動 |
+| `pnpm build` | 本番ビルド（TypeScript の型検査を含む） |
+| `pnpm lint` | ESLint |
+| `pnpm exec ampx sandbox` | バックエンドをサンドボックス環境へデプロイ |
+| `pnpm exec ampx sandbox delete` | サンドボックス環境を削除 |
 
 ## ディレクトリ構成
 

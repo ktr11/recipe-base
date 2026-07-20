@@ -53,9 +53,9 @@ auth/resource.ts を設計に合わせて修正 → commit
 
 ### 検証
 
-- バックエンドを変更したら `npx tsc --noEmit -p amplify/tsconfig.json`
-- フロントエンドを変更したら `npm run build`（型検査を含む）
-- `npx ampx sandbox` は実際に AWS リソースを作成する。**実行前に確認を取ること**
+- バックエンドを変更したら `pnpm exec tsc --noEmit -p amplify/tsconfig.json`
+- フロントエンドを変更したら `pnpm build`（型検査を含む）
+- `pnpm exec ampx sandbox` は実際に AWS リソースを作成する。**実行前に確認を取ること**
 
 ### スコープ外（v1 では実装しない）
 
@@ -70,6 +70,9 @@ auth/resource.ts を設計に合わせて修正 → commit
 
 ## 規約
 
+- パッケージマネージャーは **pnpm**（`package.json` の `packageManager` で固定）。
+  npm / yarn のコマンドを使わないこと。ネイティブバイナリを持つ依存を追加した
+  場合は、`pnpm.onlyBuiltDependencies` への追加が必要になることがある
 - `src/` ディレクトリ構成。パスエイリアスは `@/*` → `./src/*`
 - Tailwind CSS は **v4**。`tailwind.config.js` は使わず CSS 側で設定する
 - daisyUI のテーマは組み込みの `light` / `cupcake` / `night` / `black` を
