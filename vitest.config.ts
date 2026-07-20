@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -11,8 +12,14 @@ import { defineConfig } from 'vitest/config';
  * vitest.integration.config.ts 側で明示的に実行する。
  */
 export default defineConfig({
+  // src/ のコードは @/* エイリアスを使うため、テストからも解決できるようにする
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   test: {
     include: ['src/**/*.test.ts', 'tests/unit/**/*.test.ts'],
     exclude: ['tests/integration/**'],
+    // localStorage を使うため。ブラウザ相当の環境が要る
+    environment: 'jsdom',
   },
 });
