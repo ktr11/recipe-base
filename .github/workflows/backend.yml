@@ -1,0 +1,79 @@
+name: Backend
+
+# 使い捨てのサンドボックスをデプロイし、バックエンドの型検査と統合テストを実行する。
+#
+# なぜデプロイが必要か:
+#   - $amplify/env/* の型は Amplify がデプロイ時に生成する。リポジトリには
+#     含まれないため、デプロイせずにバックエンドの型検査はできない
+#   - 認可ルールの検証はモックでは何も証明できない。実際にデプロイされた
+#     AppSync に対してリクエストを投げるしかない（docs/design.md §10.2）
+#
+# 実行に5〜7分かかり AWS 料金も発生するため、バックエンドか統合テストに
+# 変更があった PR に限定している。
+on:
+  pull_request:
+    paths:
+      - 'amplify/**'
+      - 'tests/integration/**'
+      - '.github/workflows/backend.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+# OIDC トークンの発行に必要。これが無いとロールを assume できない
+permissions:
+  id-token: write
+  contents: read
+
+# 同じ PR で並行してデプロイしないようにする。
+# cancel-in-progress は使わない。デプロイ途中で打ち切ると
+# サンドボックスが破棄されずに残るため。
+concurrency:
+  group: backend-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_REGION: ap-northeast-1
+      # PR ごとに独立したサンドボックスを作り、PR 間で状態が衝突しないようにする
+      SANDBOX_ID: pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 依存関係をインストール
+        run: pnpm install --frozen-lockfile
+
+      # ロールの信頼ポリシーは、GitHub が送る sub クレームと完全に一致している
+      # 必要がある。この sub は名前ではなく ID を含む形式:
+      #   repo:<owner>@<ownerId>/<repo>@<repoId>:pull_request
+      # 名前ベースで書くと assume に失敗する（リポジトリの改名や譲渡で
+      # 権限が別人に渡らないよう、ID で固定されているため）。
+      - name: AWS 認証情報を取得
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: サンドボックスをデプロイ
+        run: pnpm exec ampx sandbox --once --identifier "$SANDBOX_ID"
+
+      # デプロイによって $amplify/env/* の型が生成されるため、ここで初めて実行できる
+      - name: バックエンドの型検査
+        run: pnpm exec tsc --noEmit -p amplify/tsconfig.json
+
+      - name: 統合テスト
+        run: pnpm test:integration
+
+      # テストが落ちても環境を残さない。残すと次回以降のコストになる
+      - name: サンドボックスを破棄
+        if: always()
+        run: pnpm exec ampx sandbox delete --identifier "$SANDBOX_ID" --yes

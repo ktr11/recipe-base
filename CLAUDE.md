@@ -54,13 +54,17 @@ auth/resource.ts を設計に合わせて修正 → commit
 ### 検証
 
 - バックエンドを変更したら `pnpm exec tsc --noEmit -p amplify/tsconfig.json`。
-  **これは CI で実行できないので、手元で必ず通すこと。** `$amplify/env/*` の型は
-  デプロイ時にのみ生成され、リポジトリには含まれないため
+  `$amplify/env/*` の型はデプロイ時にのみ生成されるため、一度も
+  `ampx sandbox` を実行していない環境では通らない
 - フロントエンドを変更したら `pnpm build`（型検査を含む）
 - **バックエンドを変更した場合も `pnpm build` を通すこと。** `amplify/` は
   ルートの tsconfig から除外してあるが、`src/` が `amplify/data/resource` の
   型を参照するため、スキーマの変更はフロントエンドのビルドを壊し得る
 - 認可を変更したら `pnpm test:integration`（デプロイ済み sandbox が必要）
+- `amplify/` か `tests/integration/` を変更した PR では、CI が使い捨ての
+  サンドボックスをデプロイしてバックエンドの型検査と統合テストを実行する
+  （`.github/workflows/backend.yml`）。5〜7分かかり AWS 料金も発生するため、
+  手元で通してから push すること
 - `pnpm exec ampx sandbox` は実際に AWS リソースを作成する。**実行前に確認を取ること**
 
 ### スコープ外（v1 では実装しない）
