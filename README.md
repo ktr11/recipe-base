@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# recipe-base
 
-## Getting Started
+レシピを保存し、家族間で共有するための Web アプリケーション。
 
-First, run the development server:
+- レシピ（料理名・材料・分量・ラベル・メモ・参考 URL）の登録と検索
+- 招待コードによる「チーム」への参加と、チーム内でのレシピ・ラベルの共有
+- ログイン不要で試せるゲストモード（データは端末内にのみ保存）
+- レシピ詳細での x人前スケーリング表示
+- 4種類のカラーテーマ切り替え
+
+## 技術スタック
+
+| 領域 | 使用技術 |
+|---|---|
+| フロントエンド | Next.js 16（App Router）/ React 19 / TypeScript |
+| スタイリング | Tailwind CSS v4 + daisyUI 5 |
+| バックエンド | AWS Amplify Gen 2 |
+| 認証 | Amazon Cognito |
+| データベース | Amazon DynamoDB（Amplify Data 経由） |
+
+インフラは Amplify Gen 2 の標準に従い、すべて `amplify/` 配下の TypeScript から
+プロビジョニングする。CloudFormation テンプレートの直接編集や、AWS コンソールでの
+手動構築は行わない。
+
+## セットアップ
+
+前提: Node.js 20 以上、AWS 認証情報が設定済みであること（`aws sts get-caller-identity` で確認できる）。
+
+```bash
+npm install
+```
+
+### バックエンド（開発用サンドボックス）
+
+```bash
+npx ampx sandbox
+```
+
+自分専用の AWS 環境にバックエンドをデプロイし、接続情報を `amplify_outputs.json` に
+出力する。このファイルは Git 管理外で、フロントエンドの起動に必要になる。
+実行したまま常駐させると、`amplify/` の変更を検知して自動で再デプロイする。
+
+### フロントエンド
+
+別のターミナルで:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 で起動する。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## コマンド
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| コマンド | 内容 |
+|---|---|
+| `npm run dev` | 開発サーバーを起動 |
+| `npm run build` | 本番ビルド（TypeScript の型検査を含む） |
+| `npm run lint` | ESLint |
+| `npx ampx sandbox` | バックエンドをサンドボックス環境へデプロイ |
+| `npx ampx sandbox delete` | サンドボックス環境を削除 |
 
-## Learn More
+## ディレクトリ構成
 
-To learn more about Next.js, take a look at the following resources:
+```
+amplify/          バックエンド定義（IaC）
+  auth/           Cognito の設定
+  data/           DynamoDB のスキーマと認可ルール
+  backend.ts      バックエンド全体の組み立てと CDK による細部設定
+src/app/          Next.js の App Router
+docs/
+  design.md       設計書（実装の判断根拠はすべてここにある）
+  initial.md      当初の要件定義
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 設計について
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**実装前に `docs/design.md` を読むこと。** 一見不自然に見える設計判断の多くは、
+AWS 側の制約を踏まえた意図的なものであり、理由が設計書に記録されている。例:
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- ゲストのデータを AWS に保存せず localStorage に置く理由（§5.1）
+- 材料とラベル参照を正規化せず Recipe に埋め込む理由（§1.4）
+- 検索をサーバー側ではなくクライアント側で行う理由（§1.5）
+- Cognito のカスタム属性を使わない理由（§6.2）
