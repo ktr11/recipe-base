@@ -1,4 +1,6 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
+import { postConfirmation } from '../auth/post-confirmation/resource';
+import { teamFunction } from '../functions/team/resource';
 
 /**
  * データモデル定義（docs/design.md §1）
@@ -110,10 +112,38 @@ const schema = a.schema({
     .identifier(['userId'])
     .secondaryIndexes((index) => [index('teamId')])
     .authorization((allow) => [
-      allow.ownerDefinedIn('userId').to(['read', 'update']),
+      // identityClaim('sub') を明示しているのは意図的。
+      // 既定では cognito:username が使われるが、userId には sub を入れる設計
+      // なので、username と sub が一致することに暗黙に依存してしまう。
+      // メールアドレスをサインイン属性にした場合は実際に一致するが、
+      // 依存を残さず claim 側を sub に固定する。
+      allow.ownerDefinedIn('userId').identityClaim('sub').to(['read', 'update']),
       allow.groupDefinedIn('teamId').to(['read']),
     ]),
-});
+
+  /**
+   * アカウントの自己修復（§2.7）
+   *
+   * postConfirmation の失敗により「確認済みだがチームが無い」状態になった
+   * ユーザーを救う。クライアントはサインイン後に UserProfile の存在を確認し、
+   * 無ければこれを呼ぶ。
+   */
+  RepairAccountResult: a.customType({
+    teamId: a.string().required(),
+  }),
+
+  repairAccount: a
+    .mutation()
+    .returns(a.ref('RepairAccountResult'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
+})
+  // バックエンドの Lambda にデータアクセスを許可する。
+  // モデル単位ではなくスキーマ全体に付ける API である点に注意。
+  .authorization((allow) => [
+    allow.resource(postConfirmation),
+    allow.resource(teamFunction),
+  ]);
 
 export type Schema = ClientSchema<typeof schema>;
 

@@ -1,4 +1,5 @@
 import { defineAuth } from '@aws-amplify/backend';
+import { postConfirmation } from './post-confirmation/resource';
 
 /**
  * 認証リソース定義
@@ -26,4 +27,8 @@ export const auth = defineAuth({
     },
   },
   accountRecovery: 'EMAIL_ONLY',
+  triggers: {
+    // サインアップ確定時に個人チームを生成する（docs/design.md §2.4）
+    postConfirmation,
+  },
 });
