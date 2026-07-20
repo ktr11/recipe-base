@@ -1,10 +1,13 @@
 import { defineBackend } from '@aws-amplify/backend';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { auth } from './auth/resource';
+import { postConfirmation } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
 
 const backend = defineBackend({
   auth,
   data,
+  postConfirmation,
 });
 
 const { cfnUserPool, cfnIdentityPool } = backend.auth.resources.cfnResources;
@@ -37,3 +40,21 @@ cfnUserPool.policies = {
  * 未認証 Identity 自体を発行しないことで経路ごと塞ぐ。
  */
 cfnIdentityPool.allowUnauthenticatedIdentities = false;
+
+/**
+ * Lambda に Cognito のグループ操作権限を与える（docs/design.md §2.2）
+ *
+ * チームは Cognito グループとして表現され、グループの作成とユーザーの
+ * 所属変更は Admin API でしか行えない。クライアントからは実行できないため、
+ * バックエンドの Lambda 実行ロールにのみ権限を付与する。
+ *
+ * cognito-idp:* は付与しない。必要な操作のみを、対象 User Pool の ARN に
+ * 限定して与える。
+ */
+backend.postConfirmation.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    sid: 'AllowCognitoGroupManagement',
+    actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+);

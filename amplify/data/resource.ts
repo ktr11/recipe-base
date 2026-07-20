@@ -1,4 +1,5 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
+import { postConfirmation } from '../auth/post-confirmation/resource';
 
 /**
  * データモデル定義（docs/design.md §1）
@@ -110,10 +111,18 @@ const schema = a.schema({
     .identifier(['userId'])
     .secondaryIndexes((index) => [index('teamId')])
     .authorization((allow) => [
-      allow.ownerDefinedIn('userId').to(['read', 'update']),
+      // identityClaim('sub') を明示しているのは意図的。
+      // 既定では cognito:username が使われるが、userId には sub を入れる設計
+      // なので、username と sub が一致することに暗黙に依存してしまう。
+      // メールアドレスをサインイン属性にした場合は実際に一致するが、
+      // 依存を残さず claim 側を sub に固定する。
+      allow.ownerDefinedIn('userId').identityClaim('sub').to(['read', 'update']),
       allow.groupDefinedIn('teamId').to(['read']),
     ]),
-});
+})
+  // バックエンドの Lambda にデータアクセスを許可する。
+  // モデル単位ではなくスキーマ全体に付ける API である点に注意。
+  .authorization((allow) => [allow.resource(postConfirmation)]);
 
 export type Schema = ClientSchema<typeof schema>;
 
