@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Amplify がデプロイ時に生成する CloudFormation テンプレートと
+    // バンドル済み JS。人が書いたコードではないため検査対象にしない
+    ".amplify/**",
   ]),
 ]);
 
