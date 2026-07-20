@@ -52,14 +52,11 @@ jobs:
       - name: 依存関係をインストール
         run: pnpm install --frozen-lockfile
 
-      # TODO: 信頼ポリシーの検証が済んだら削除する
-      - name: OIDC クレームを確認（デバッグ）
-        run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          # トークン本体は出力しない。照合に必要なクレームだけを見る
-          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{sub, aud, repository, event_name, ref}'
-
+      # ロールの信頼ポリシーは、GitHub が送る sub クレームと完全に一致している
+      # 必要がある。この sub は名前ではなく ID を含む形式:
+      #   repo:<owner>@<ownerId>/<repo>@<repoId>:pull_request
+      # 名前ベースで書くと assume に失敗する（リポジトリの改名や譲渡で
+      # 権限が別人に渡らないよう、ID で固定されているため）。
       - name: AWS 認証情報を取得
         uses: aws-actions/configure-aws-credentials@v4
         with:
