@@ -45,12 +45,15 @@
 
 `Recipe` / `Label` / `UserProfile` / `Team` のすべてが同じ `allow.groupDefinedIn("teamId")` を使う。所有者ベースの認可とグループ認可を分岐させない。
 
-これを成立させるため、**Cognito グループ名は teamId の値そのもの**とする（例: グループ名 `01J8XQ...`）。`Team` モデルは `teamId` を主キーとして宣言し、自動採番の `id` を使わない。
+これを成立させるため、**Cognito グループ名は teamId の値そのもの**とする。`Team` モデルは `teamId` を主キーとして宣言し、自動採番の `id` を使わない。
+
+`teamId` は Lambda が `crypto.randomUUID()` で採番する。順序性は不要なため、依存を増やしてまで ULID を使う理由がない。
 
 ### 1.3 スキーマ定義（`amplify/data/resource.ts`）
 
 ```ts
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend'
+import { postConfirmation } from '../auth/post-confirmation/resource'
 import { teamFunction } from '../functions/team/resource'
 
 const schema = a.schema({
@@ -73,8 +76,8 @@ const schema = a.schema({
     .identifier(['teamId'])
     .secondaryIndexes((index) => [index('inviteCode')])
     .authorization((allow) => [
+      // 作成・削除・招待コード検証は Lambda のみが行う
       allow.groupDefinedIn('teamId').to(['read', 'update']),
-      allow.resource(teamFunction), // 作成・削除・招待コード検証は Lambda のみ
     ]),
 
   // ---- レシピ ----
@@ -92,7 +95,6 @@ const schema = a.schema({
     .secondaryIndexes((index) => [index('teamId')])
     .authorization((allow) => [
       allow.groupDefinedIn('teamId'),
-      allow.resource(teamFunction), // チーム移動時の一括書き換え
     ]),
 
   // ---- ラベル ----
@@ -104,7 +106,6 @@ const schema = a.schema({
     .secondaryIndexes((index) => [index('teamId')])
     .authorization((allow) => [
       allow.groupDefinedIn('teamId'),
-      allow.resource(teamFunction),
     ]),
 
   // ---- ユーザープロフィール ----
@@ -118,9 +119,10 @@ const schema = a.schema({
     .identifier(['userId'])
     .secondaryIndexes((index) => [index('teamId')])
     .authorization((allow) => [
-      allow.ownerDefinedIn('userId').to(['read', 'update']),
+      // identityClaim('sub') の明示は必須。既定では cognito:username が使われ、
+      // userId に sub を入れる設計と食い違う（§2.4 参照）
+      allow.ownerDefinedIn('userId').identityClaim('sub').to(['read', 'update']),
       allow.groupDefinedIn('teamId').to(['read']),
-      allow.resource(teamFunction),
     ]),
 
   // ---- カスタムミューテーション（すべて Lambda 実装） ----
@@ -149,6 +151,13 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(teamFunction)),
 })
+  // バックエンドの Lambda へのデータアクセス許可は、モデル単位ではなく
+  // スキーマ全体に付ける。モデルごとの authorization に allow.resource() を
+  // 書く API は存在しない。
+  .authorization((allow) => [
+    allow.resource(postConfirmation),
+    allow.resource(teamFunction),
+  ])
 
 export type Schema = ClientSchema<typeof schema>
 
@@ -219,6 +228,26 @@ export const data = defineData({
 | `postConfirmationFunction` | Cognito トリガー | サインアップ確定時に個人チームを生成 |
 | `teamFunction` | AppSync リゾルバ | `joinTeam` / `leaveTeam` / `issueInviteCode` / `repairAccount` の4ミューテーションを処理 |
 
+**⚠️ `postConfirmationFunction` には `resourceGroupName: 'auth'` の指定が必須。**
+この関数は auth のトリガーでありながら data へのアクセスを必要とするため、既定の
+スタック配置のままだと auth → function → data → auth の循環参照になりデプロイできない。
+auth スタックに同居させることで解消する。
+
+**⚠️ Cognito 操作の IAM ポリシーは、auth / data とは別のスタックに置く必要がある。**
+`postConfirmation` は auth スタック内にあり User Pool からトリガーとして参照されている。
+その実行ロールに User Pool の ARN を参照するポリシーを直接付けると、
+
+```
+UserPool → trigger → Lambda → 実行ロール → ポリシー → UserPool
+```
+
+という循環が auth スタック内に閉じ、CloudFormation がデプロイを拒否する。
+`backend.createStack()` でポリシー専用のスタックを作り、そこから両 Lambda の
+実行ロールにアタッチすると依存が一方向になり解消する（auth スタックは
+ポリシースタックを参照しないため輪が閉じない）。
+
+この分離により、権限範囲を広げる妥協をせずに済む。
+
 IAM 権限は**対象 User Pool の ARN に限定**し、以下のみを付与する。`cognito-idp:*` は付与しない。
 
 ```
@@ -246,7 +275,7 @@ cognito-idp:AdminRemoveUserFromGroup
 Cognito が post-confirmation トリガーを起動
   ↓
 Lambda:
-  1. teamId を生成（ULID）
+  1. teamId を生成（`crypto.randomUUID()`）
   2. Cognito グループ `${teamId}` を作成
   3. ユーザーを当該グループに追加
   4. Team レコードを作成（name: "マイレシピ", memberCount: 1）
@@ -256,6 +285,12 @@ Lambda:
 ```
 
 > **⚠️ このトリガーが失敗しても、ユーザーの確認自体は既に完了している。** 結果「確認済みだがチームが無い」ユーザーが生まれ、以後すべての画面が空になる。対策として §2.7 の自己修復パスを必ず実装する。
+>
+> このため、トリガー内で例外を投げない。投げてもサインアップ API がエラーを返すだけで確認済み状態は取り消せず、ユーザー体験が悪化するだけになる。失敗はログに残し、復旧は `repairAccount` に委ねる。
+
+**`sub` と `username` を混同しないこと。** `UserProfile.userId` に入れるのは `sub`、Cognito の Admin API に渡すのは `username` であり、両者は由来の異なる値である。メールアドレスをサインイン属性にした場合、Cognito は username として UUID を採番し実質 `sub` と一致するが、**その一致に依存した実装をしない**。それぞれ正しい出所の値を使う（`event.request.userAttributes.sub` と `event.userName`）。
+
+同じ理由で、`UserProfile` の owner 認可には `identityClaim('sub')` を明示する。既定の claim は `cognito:username` であり、指定を省くと上記の一致に暗黙に依存することになる。
 
 ### 2.5 フロー: 招待コードによる参加
 
