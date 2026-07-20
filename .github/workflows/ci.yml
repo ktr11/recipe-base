@@ -42,6 +42,12 @@ jobs:
       # サンドボックスをデプロイするジョブを別途用意し、そこで実行する。
       # それまでは手元での実行に頼る（CLAUDE.md の検証手順を参照）。
 
+      # フロントエンドは amplify_outputs.json を静的インポートするが、この
+      # ファイルはデプロイ時に生成される Git 管理外のもの。AWS 認証情報を
+      # 持たない本ジョブでは生成できないため、ビルドを通すためのダミーを置く
+      - name: amplify_outputs.json のプレースホルダを用意
+        run: node scripts/ensure-amplify-outputs.mjs
+
       # 型検査を含む。スキーマ変更がフロントエンドを壊していないかもここで分かる
       - name: フロントエンドのビルド
         run: pnpm build

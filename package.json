@@ -20,6 +20,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@aws-amplify/adapter-nextjs": "^1.7.3",
     "aws-amplify": "^6.18.0",
     "next": "16.2.10",
     "react": "19.2.4",
