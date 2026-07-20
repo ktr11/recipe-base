@@ -1,26 +1,33 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * daisyUI 5 の設定（docs/design.md §6.1）
+ *
+ * Tailwind CSS v4 では tailwind.config.js を使わず、ここで設定する。
+ *
+ * 4テーマはいずれも daisyUI の組み込みテーマをそのまま使い、独自テーマを
+ * 定義しない。組み込みなら色定義を書く必要がゼロで、配色バランスも
+ * 検証済みのため。
+ *
+ *   light   … ライト ブルー
+ *   cupcake … ライト イエロー
+ *   night   … ダーク ブルーブラック
+ *   black   … ダーク ブラック
+ *
+ * night に --prefersdark を付けているのは、テーマを一度も選んでいない
+ * 初回訪問時に OS の設定へ従わせるため。選択後は data-theme が明示的に
+ * 指定されるので、そちらが優先される。
+ */
+@plugin "daisyui" {
+  themes: light --default, cupcake, night --prefersdark, black;
 }
 
+/*
+ * 背景色と文字色は daisyUI のテーマが供給するため、ここでは指定しない。
+ * create-next-app が生成した :root の色指定と prefers-color-scheme の
+ * ブロックは、テーマ切り替えと競合するので削除した。
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
