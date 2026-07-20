@@ -3,11 +3,13 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { auth } from './auth/resource';
 import { postConfirmation } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
+import { teamFunction } from './functions/team/resource';
 
 const backend = defineBackend({
   auth,
   data,
   postConfirmation,
+  teamFunction,
 });
 
 const { cfnUserPool, cfnIdentityPool } = backend.auth.resources.cfnResources;
@@ -51,10 +53,20 @@ cfnIdentityPool.allowUnauthenticatedIdentities = false;
  * cognito-idp:* は付与しない。必要な操作のみを、対象 User Pool の ARN に
  * 限定して与える。
  */
+const cognitoGroupManagement = new PolicyStatement({
+  sid: 'AllowCognitoGroupManagement',
+  actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+});
+
 backend.postConfirmation.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    sid: 'AllowCognitoGroupManagement',
-    actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
-    resources: [backend.auth.resources.userPool.userPoolArn],
-  }),
+  cognitoGroupManagement,
+);
+backend.teamFunction.resources.lambda.addToRolePolicy(cognitoGroupManagement);
+
+// postConfirmation はトリガーイベントから userPoolId を受け取れるが、
+// teamFunction は AppSync 経由で呼ばれるため環境変数で渡す必要がある。
+backend.teamFunction.addEnvironment(
+  'USER_POOL_ID',
+  backend.auth.resources.userPool.userPoolId,
 );
