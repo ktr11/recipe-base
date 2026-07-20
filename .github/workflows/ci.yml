@@ -35,9 +35,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # amplify/ はルートの tsconfig から除外してあるため、別途検査する必要がある
-      - name: バックエンドの型検査
-        run: pnpm exec tsc --noEmit -p amplify/tsconfig.json
+      # バックエンド（amplify/）の型検査はここでは実行できない。
+      # Lambda が使う $amplify/env/* の型は Amplify がデプロイ時に生成するもので、
+      # .gitignore 対象かつオフラインでは生成できない（ampx generate は
+      # いずれも "post deployment artifacts" を対象とする）。
+      # サンドボックスをデプロイするジョブを別途用意し、そこで実行する。
+      # それまでは手元での実行に頼る（CLAUDE.md の検証手順を参照）。
 
       # 型検査を含む。スキーマ変更がフロントエンドを壊していないかもここで分かる
       - name: フロントエンドのビルド
