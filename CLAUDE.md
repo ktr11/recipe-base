@@ -53,7 +53,9 @@ auth/resource.ts を設計に合わせて修正 → commit
 
 ### 検証
 
-- バックエンドを変更したら `pnpm exec tsc --noEmit -p amplify/tsconfig.json`
+- バックエンドを変更したら `pnpm exec tsc --noEmit -p amplify/tsconfig.json`。
+  **これは CI で実行できないので、手元で必ず通すこと。** `$amplify/env/*` の型は
+  デプロイ時にのみ生成され、リポジトリには含まれないため
 - フロントエンドを変更したら `pnpm build`（型検査を含む）
 - **バックエンドを変更した場合も `pnpm build` を通すこと。** `amplify/` は
   ルートの tsconfig から除外してあるが、`src/` が `amplify/data/resource` の

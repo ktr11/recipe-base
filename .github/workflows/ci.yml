@@ -1,0 +1,50 @@
+name: CI
+
+# PR とマージ先ブランチで、AWS を必要としない検証をすべて実行する。
+# 統合テスト（pnpm test:integration）はデプロイ済みバックエンドと AWS 認証情報を
+# 必要とするためここには含めない。docs/design.md §10 を参照。
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 同じ PR に続けて push した場合、古い実行を打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # packageManager フィールドの pnpm を使う。バージョンをここに二重管理しない
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # pnpm はネイティブバイナリを持つ依存の postinstall を既定でブロックする。
+      # 許可対象は package.json の pnpm.onlyBuiltDependencies で管理している
+      - name: 依存関係をインストール
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      # バックエンド（amplify/）の型検査はここでは実行できない。
+      # Lambda が使う $amplify/env/* の型は Amplify がデプロイ時に生成するもので、
+      # .gitignore 対象かつオフラインでは生成できない（ampx generate は
+      # いずれも "post deployment artifacts" を対象とする）。
+      # サンドボックスをデプロイするジョブを別途用意し、そこで実行する。
+      # それまでは手元での実行に頼る（CLAUDE.md の検証手順を参照）。
+
+      # 型検査を含む。スキーマ変更がフロントエンドを壊していないかもここで分かる
+      - name: フロントエンドのビルド
+        run: pnpm build
+
+      - name: 単体テスト
+        run: pnpm test
