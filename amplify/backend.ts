@@ -1,5 +1,5 @@
 import { defineBackend } from '@aws-amplify/backend';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { auth } from './auth/resource';
 import { postConfirmation } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
@@ -53,16 +53,41 @@ cfnIdentityPool.allowUnauthenticatedIdentities = false;
  * cognito-idp:* は付与しない。必要な操作のみを、対象 User Pool の ARN に
  * 限定して与える。
  */
-const cognitoGroupManagement = new PolicyStatement({
-  sid: 'AllowCognitoGroupManagement',
-  actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
-  resources: [backend.auth.resources.userPool.userPoolArn],
+/**
+ * ポリシーを auth / data とは別のスタックに置く理由（重要）
+ *
+ * postConfirmation は auth スタック内にあり、User Pool からトリガーとして
+ * 参照されている。ここで実行ロールに「User Pool の ARN を参照するポリシー」を
+ * 直接付けると、
+ *
+ *   UserPool → trigger → Lambda → 実行ロール → ポリシー → UserPool
+ *
+ * という循環が auth スタック内に閉じ、CloudFormation がデプロイを拒否する
+ * （実際に CloudformationResourceCircularDependencyError で失敗した）。
+ *
+ * ポリシーだけを独立したスタックに切り出すと依存が一方向になる:
+ *
+ *   auth スタック  : UserPool → trigger → Lambda → 実行ロール
+ *   policy スタック: Policy → 実行ロール / UserPool を参照
+ *
+ * auth スタックは policy スタックを一切参照しないため、輪が閉じない。
+ * これにより権限を対象 User Pool の ARN に限定したまま循環を回避できる。
+ */
+const policyStack = backend.createStack('CognitoGroupAccess');
+
+const groupManagementPolicy = new Policy(policyStack, 'GroupManagement', {
+  statements: [
+    new PolicyStatement({
+      sid: 'AllowCognitoGroupManagement',
+      // cognito-idp:* は付与しない。必要な2操作のみに限定する。
+      actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
+      resources: [backend.auth.resources.userPool.userPoolArn],
+    }),
+  ],
 });
 
-backend.postConfirmation.resources.lambda.addToRolePolicy(
-  cognitoGroupManagement,
-);
-backend.teamFunction.resources.lambda.addToRolePolicy(cognitoGroupManagement);
+groupManagementPolicy.attachToRole(backend.postConfirmation.resources.lambda.role!);
+groupManagementPolicy.attachToRole(backend.teamFunction.resources.lambda.role!);
 
 // postConfirmation はトリガーイベントから userPoolId を受け取れるが、
 // teamFunction は AppSync 経由で呼ばれるため環境変数で渡す必要がある。
