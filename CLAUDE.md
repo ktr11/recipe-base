@@ -55,6 +55,10 @@ auth/resource.ts を設計に合わせて修正 → commit
 
 - バックエンドを変更したら `pnpm exec tsc --noEmit -p amplify/tsconfig.json`
 - フロントエンドを変更したら `pnpm build`（型検査を含む）
+- **バックエンドを変更した場合も `pnpm build` を通すこと。** `amplify/` は
+  ルートの tsconfig から除外してあるが、`src/` が `amplify/data/resource` の
+  型を参照するため、スキーマの変更はフロントエンドのビルドを壊し得る
+- 認可を変更したら `pnpm test:integration`（デプロイ済み sandbox が必要）
 - `pnpm exec ampx sandbox` は実際に AWS リソースを作成する。**実行前に確認を取ること**
 
 ### スコープ外（v1 では実装しない）

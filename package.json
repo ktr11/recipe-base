@@ -15,7 +15,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "aws-amplify": "^6.18.0",
@@ -27,6 +29,7 @@
     "@aws-amplify/backend": "^1.23.0",
     "@aws-amplify/backend-cli": "^1.8.3",
     "@aws-sdk/client-cognito-identity-provider": "^3.1090.0",
+    "@aws-sdk/client-dynamodb": "^3.1090.0",
     "@tailwindcss/postcss": "^4",
     "@types/aws-lambda": "^8.10.162",
     "@types/node": "^20",
@@ -39,6 +42,7 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }
