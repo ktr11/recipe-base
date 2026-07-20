@@ -38,6 +38,7 @@
     "@types/react-dom": "^19",
     "aws-cdk-lib": "^2.244.0",
     "constructs": "^10.7.0",
+    "daisyui": "^5.6.18",
     "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
