@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import AppNav from "@/components/AppNav";
 import ConfigureAmplify from "@/components/ConfigureAmplify";
 import ThemeScript from "@/components/ThemeScript";
 import "./globals.css";
@@ -37,6 +38,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <ConfigureAmplify />
+        <AppNav />
         {children}
       </body>
     </html>

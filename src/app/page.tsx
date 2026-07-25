@@ -3,9 +3,8 @@ import Link from 'next/link';
 /**
  * ランディング（docs/design.md §3.1）
  *
- * 本来は「ゲストとして利用」「サインイン / 新規登録」の導線を置く画面。
- * 遷移先の画面がまだ無いため、現時点ではテーマ設定への導線のみを置く
- * 最小構成にしている。ステップ7以降で本来の内容にする。
+ * サインイン / 新規登録の導線は、認証画面が用意できるステップ以降で追加する。
+ * 現時点ではゲストとして使い始める導線のみを置く。
  */
 export default function Home() {
   return (
@@ -13,10 +12,17 @@ export default function Home() {
       <h1 className="text-3xl font-bold">レシピ共有</h1>
       <p className="text-base-content/70">
         レシピを保存し、家族で共有するためのアプリです。
+        <br />
+        登録しなくても、この端末の中だけで試せます。
       </p>
-      <Link href="/settings" className="btn btn-primary">
-        設定を開く
-      </Link>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Link href="/recipes" className="btn btn-primary">
+          ゲストとして利用する
+        </Link>
+        <Link href="/settings" className="btn btn-ghost">
+          設定
+        </Link>
+      </div>
     </main>
   );
 }
