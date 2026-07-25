@@ -64,6 +64,14 @@ http://localhost:3000 で起動する。
 | `pnpm exec ampx sandbox` | バックエンドをサンドボックス環境へデプロイ |
 | `pnpm exec ampx sandbox delete` | サンドボックス環境を削除 |
 
+## CI
+
+- **`ci.yml`** — すべての PR と main への push で lint / build / 単体テストを実行（AWS 不要）
+- **`backend.yml`** — バックエンドの型検査と認可の統合テスト（AWS 必要）。コスト対策で
+  **PR では `backend-ci` ラベルを付けた時だけ**実行し、main への push では保険として必ず
+  実行する。常設の `ci` サンドボックスを使い回し、スキーマを変えた PR の時だけ使い捨て
+  環境をデプロイする（詳細は `docs/design.md §10.4`）
+
 ## ディレクトリ構成
 
 ```
