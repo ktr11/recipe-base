@@ -1,6 +1,6 @@
 name: Backend
 
-# 使い捨てのサンドボックスをデプロイし、バックエンドの型検査と統合テストを実行する。
+# バックエンド（amplify/）の型検査と、認可ルールの統合テストを実行する。
 #
 # なぜデプロイが必要か:
 #   - $amplify/env/* の型は Amplify がデプロイ時に生成する。リポジトリには
@@ -8,37 +8,52 @@ name: Backend
 #   - 認可ルールの検証はモックでは何も証明できない。実際にデプロイされた
 #     AppSync に対してリクエストを投げるしかない（docs/design.md §10.2）
 #
-# 実行に5〜7分かかり AWS 料金も発生するため、バックエンドか統合テストに
-# 変更があった PR に限定している。
+# コスト対策（docs/design.md §10.4）:
+#   - PR では backend-ci ラベルが付いた時だけ実行する（既定は無料の ci.yml のみ）
+#   - main への push では保険として必ず実行する
+#   - 常設の "ci" サンドボックスを使い回し、毎回のフルデプロイ（5〜7分）を避ける。
+#     スキーマ（バックエンド）を変えた PR の時だけ、隔離した使い捨ての
+#     サンドボックス pr-<番号> をデプロイして破棄する
 on:
   pull_request:
+    # paths での絞り込みはやめ、backend-ci ラベルで明示的に opt-in する（下の if）
+    types: [labeled, synchronize, reopened]
+  push:
+    branches: [main]
     paths:
       - 'amplify/**'
       - 'tests/integration/**'
       - '.github/workflows/backend.yml'
       - 'package.json'
       - 'pnpm-lock.yaml'
+  # 常設 "ci" サンドボックスの bootstrap や、任意のタイミングでの再検証に使う
+  workflow_dispatch:
 
 # OIDC トークンの発行に必要。これが無いとロールを assume できない
 permissions:
   id-token: write
   contents: read
 
-# 同じ PR で並行してデプロイしないようにする。
-# cancel-in-progress は使わない。デプロイ途中で打ち切ると
-# サンドボックスが破棄されずに残るため。
+# 常設 "ci" サンドボックスを同時に変更（CloudFormation の更新衝突）しないよう、
+# ワークフロー全体を直列化する。cancel-in-progress は使わない。デプロイ途中で
+# 打ち切るとサンドボックスが破棄されずに残るため。
 concurrency:
-  group: backend-${{ github.event.pull_request.number }}
+  group: backend
   cancel-in-progress: false
 
 jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # ラベル opt-in の本体。PR では backend-ci ラベルが付いている時だけ実行する。
+    # main への push と手動実行（workflow_dispatch）は常に実行する。
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'backend-ci'))
     env:
       AWS_REGION: ap-northeast-1
-      # PR ごとに独立したサンドボックスを作り、PR 間で状態が衝突しないようにする
-      SANDBOX_ID: pr-${{ github.event.pull_request.number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +67,34 @@ jobs:
       - name: 依存関係をインストール
         run: pnpm install --frozen-lockfile
 
+      # スキーマ（バックエンド）が変わったかを判定する。変わっていなければ
+      # 常設 "ci" サンドボックス（＝main のスキーマを反映）を使い回し、
+      # フルデプロイを省く。判定が要るのは PR の時だけ。
+      - name: バックエンド変更の有無を判定
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            backend:
+              - 'amplify/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+
+      # 使うサンドボックスと、後で破棄するかを決める。
+      #   - スキーマを変えた PR → 隔離した使い捨て pr-<番号>（末尾で破棄）
+      #   - それ以外（テストのみ変更 / main / 手動）→ 常設 "ci"（破棄しない）
+      - name: サンドボックス識別子を決定
+        id: sandbox
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
+            echo "identifier=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "ephemeral=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "identifier=ci" >> "$GITHUB_OUTPUT"
+            echo "ephemeral=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # ロールの信頼ポリシーは、GitHub が送る sub クレームと完全に一致している
       # 必要がある。この sub は名前ではなく ID を含む形式:
       #   repo:<owner>@<ownerId>/<repo>@<repoId>:pull_request
@@ -63,8 +106,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # 常設 "ci" では、スキーマ差分が無ければ実質 no-op で短時間。差分があれば
+      # それを適用する。amplify_outputs.json と $amplify/env/* の型は、この
+      # コマンドの副作用として再生成される（別途取得の仕組みは不要）。
       - name: サンドボックスをデプロイ
-        run: pnpm exec ampx sandbox --once --identifier "$SANDBOX_ID"
+        run: pnpm exec ampx sandbox --once --identifier "${{ steps.sandbox.outputs.identifier }}"
 
       # デプロイによって $amplify/env/* の型が生成されるため、ここで初めて実行できる
       - name: バックエンドの型検査
@@ -73,7 +119,8 @@ jobs:
       - name: 統合テスト
         run: pnpm test:integration
 
-      # テストが落ちても環境を残さない。残すと次回以降のコストになる
-      - name: サンドボックスを破棄
-        if: always()
-        run: pnpm exec ampx sandbox delete --identifier "$SANDBOX_ID" --yes
+      # 使い捨て pr-<番号> のみ破棄する。常設 "ci" は残す（ここが常設化の肝）。
+      # テストが落ちても使い捨て環境は残さない。残すと次回以降のコストになる。
+      - name: 使い捨てサンドボックスを破棄
+        if: always() && steps.sandbox.outputs.ephemeral == 'true'
+        run: pnpm exec ampx sandbox delete --identifier "${{ steps.sandbox.outputs.identifier }}" --yes
