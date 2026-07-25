@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -8,6 +9,10 @@ import { defineConfig } from 'vitest/config';
  * 結果として誰も実行しなくなるため。
  */
 export default defineConfig({
+  // AmplifyRepository の契約テストは src/ のコードを @/* エイリアスで参照する
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   test: {
     include: ['tests/integration/**/*.test.ts'],
     // 実ユーザーの作成とサインインを伴うため、既定のタイムアウトでは足りない

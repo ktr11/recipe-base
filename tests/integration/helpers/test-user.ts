@@ -99,6 +99,24 @@ const signInAs = async (email: string): Promise<string> => {
 };
 
 /**
+ * テストユーザーとしてサインインし、セッションを保持したままにする。
+ *
+ * 認可テスト（gql の直叩き）は idToken 文字列だけを使うため取得後すぐ
+ * サインアウトするが、AmplifyRepository は generated client 経由で
+ * Amplify がプロセス内に保持するセッションを使う。そのため Repository を
+ * 通すテストでは、サインインした状態を保ったまま実行する必要がある。
+ */
+export const signInTestUser = async (user: TestUser): Promise<void> => {
+  await signOut().catch(() => {
+    /* 未サインインなら何もしなくてよい */
+  });
+  await signIn({ username: user.email, password: PASSWORD });
+};
+
+/** 保持していたセッションを破棄する */
+export const signOutTestUser = (): Promise<void> => signOut();
+
+/**
  * 別のユーザーを、指定チームのメンバーにする。
  *
  * joinTeam はステップ10 で実装するため、現時点では Cognito グループの
