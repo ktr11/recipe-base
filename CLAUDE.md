@@ -61,10 +61,17 @@ auth/resource.ts を設計に合わせて修正 → commit
   ルートの tsconfig から除外してあるが、`src/` が `amplify/data/resource` の
   型を参照するため、スキーマの変更はフロントエンドのビルドを壊し得る
 - 認可を変更したら `pnpm test:integration`（デプロイ済み sandbox が必要）
-- `amplify/` か `tests/integration/` を変更した PR では、CI が使い捨ての
-  サンドボックスをデプロイしてバックエンドの型検査と統合テストを実行する
-  （`.github/workflows/backend.yml`）。5〜7分かかり AWS 料金も発生するため、
-  手元で通してから push すること
+- **バックエンド CI（`.github/workflows/backend.yml`）はコスト対策のため
+  既定では PR で走らない**（詳細は `docs/design.md §10.4`）。挙動:
+  - PR では **`backend-ci` ラベルを付けた時だけ**実行する。付けなければ走るのは
+    無料の `ci.yml`（lint / build / 単体テスト）のみ
+  - **main への push では保険として必ず**実行する
+  - 常設の `ci` サンドボックスを使い回すため、スキーマ未変更なら再デプロイ無しで
+    短時間。スキーマ（`amplify/**` 等）を変更した PR の時だけ使い捨ての
+    `pr-<番号>` をフルデプロイして破棄する
+  - したがって、認可やスキーマを触った PR は **`backend-ci` ラベルを付けて**
+    統合テストを通してからマージすること。手元で `pnpm test:integration` を
+    通してから push できればなお良い
 - `pnpm exec ampx sandbox` は実際に AWS リソースを作成する。**実行前に確認を取ること**
 
 ### スコープ外（v1 では実装しない）
