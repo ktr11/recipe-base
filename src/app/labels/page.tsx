@@ -21,14 +21,16 @@ export default function LabelsPage() {
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (name.trim() === '') return;
-    await getRepository().createLabel(name.trim());
+    const repo = await getRepository();
+    await repo.createLabel(name.trim());
     setName('');
     await reload();
   };
 
   const handleDelete = async () => {
     if (!target) return;
-    await getRepository().deleteLabel(target.id);
+    const repo = await getRepository();
+    await repo.deleteLabel(target.id);
     setTarget(null);
     await reload();
   };

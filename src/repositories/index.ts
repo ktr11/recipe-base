@@ -1,18 +1,22 @@
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { AmplifyRepository } from './amplify-repository';
 import { LocalStorageRepository } from './local-storage-repository';
 import type { RecipeRepository } from './recipe-repository';
 
 /**
- * 使用する Repository を決める（docs/design.md §3.3）
+ * 認証状態に応じて使用する Repository を決める（docs/design.md §3.3）
  *
- * 現時点ではゲスト用のみ。正規ユーザー向けの AmplifyRepository は
- * ステップ8 で追加し、認証状態に応じてここで差し替える。
+ * ゲストは localStorage、正規ユーザーは DynamoDB。画面コンポーネントは
+ * この関数の戻り値だけを見て、データがどこに保存されるかを知らない。
+ * 差し替えの分岐はこの1箇所に閉じる。
  *
- * 画面コンポーネントはこの関数の戻り値だけを見て、データがどこに
- * 保存されるかを知らない。
+ * 認証状態の判定は非同期（fetchAuthSession）なので、この関数も Promise を
+ * 返す。ゲストは AWS にアクセスせずトークンを持たないため（§5.1）、
+ * トークンの有無で分ける。
  */
-export const getRepository = (): RecipeRepository => new LocalStorageRepository();
-
-/** ゲストかどうか。トライアル制限の表示に使う */
-export const isGuest = (): boolean => true;
+export const getRepository = async (): Promise<RecipeRepository> => {
+  const session = await fetchAuthSession();
+  return session.tokens ? new AmplifyRepository() : new LocalStorageRepository();
+};
 
 export type { RecipeRepository };

@@ -29,7 +29,8 @@ export default function NewRecipePage() {
           labels={labels}
           submitLabel="保存"
           onSubmit={async (input) => {
-            await getRepository().createRecipe(input);
+            const repo = await getRepository();
+            await repo.createRecipe(input);
           }}
         />
       )}
