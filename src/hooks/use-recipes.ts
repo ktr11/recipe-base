@@ -5,7 +5,7 @@ import type { Label, Recipe } from '@/lib/recipes/types';
 import { getRepository } from '@/repositories';
 
 const load = async (): Promise<{ recipes: Recipe[]; labels: Label[] }> => {
-  const repo = getRepository();
+  const repo = await getRepository();
   const [recipes, labels] = await Promise.all([repo.listRecipes(), repo.listLabels()]);
   return { recipes, labels };
 };

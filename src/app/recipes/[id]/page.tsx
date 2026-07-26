@@ -27,15 +27,15 @@ export default function RecipeDetailPage() {
 
   useEffect(() => {
     let active = true;
-    void getRepository()
-      .getRecipe(params.id)
-      .then((found) => {
-        if (!active) return;
-        setRecipe(found);
-        // 初期表示は基準人前。選んだ人数は保存しない（§6.4）
-        setServings(found?.servings ?? null);
-        setLoading(false);
-      });
+    void (async () => {
+      const repo = await getRepository();
+      const found = await repo.getRecipe(params.id);
+      if (!active) return;
+      setRecipe(found);
+      // 初期表示は基準人前。選んだ人数は保存しない（§6.4）
+      setServings(found?.servings ?? null);
+      setLoading(false);
+    })();
     return () => {
       active = false;
     };
@@ -73,7 +73,8 @@ export default function RecipeDetailPage() {
             memo: recipe.memo,
           }}
           onSubmit={async (input) => {
-            await getRepository().updateRecipe(recipe.id, input);
+            const repo = await getRepository();
+            await repo.updateRecipe(recipe.id, input);
             await reload();
           }}
         />
@@ -84,7 +85,8 @@ export default function RecipeDetailPage() {
   const scaled = scaleIngredients(recipe.ingredients, recipe.servings, servings);
 
   const handleDelete = async () => {
-    await getRepository().deleteRecipe(recipe.id);
+    const repo = await getRepository();
+    await repo.deleteRecipe(recipe.id);
     await reload();
     router.push('/recipes');
   };

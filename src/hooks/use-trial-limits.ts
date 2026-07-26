@@ -1,7 +1,7 @@
 'use client';
 
 import { TRIAL_LIMITS } from '@/lib/recipes/limits';
-import { isGuest } from '@/repositories';
+import { useAuth } from './use-auth';
 
 /**
  * トライアル制限の残数（docs/design.md §4.2）
@@ -14,7 +14,7 @@ import { isGuest } from '@/repositories';
  * 作成経路を足した人がチェックを書き忘れるのが典型的な壊れ方だから。
  */
 export const useTrialLimits = (counts: { recipes: number; labels: number }) => {
-  const guest = isGuest();
+  const { guest } = useAuth();
 
   return {
     guest,
