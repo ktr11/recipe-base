@@ -19,7 +19,8 @@ export default function SignInForm() {
   const searchParams = useSearchParams();
   const redirect = safeRedirect(searchParams.get('redirect'));
 
-  const [email, setEmail] = useState('');
+  // ?email= は新規登録の完了後に戻ってきた場合に入る。入力し直させない
+  const [email, setEmail] = useState(searchParams.get('email') ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
