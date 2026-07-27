@@ -49,7 +49,7 @@ export default function SignInForm() {
           return;
 
         case 'RESET_PASSWORD':
-          router.push('/auth/reset-password');
+          router.push(`/auth/reset-password?email=${encodeURIComponent(email)}`);
           return;
 
         default:
@@ -96,7 +96,14 @@ export default function SignInForm() {
           onChange={(e) => setPassword(e.target.value)}
         />
         <p className="label">
-          <Link href="/auth/reset-password" className="link">
+          <Link
+            href={
+              email
+                ? `/auth/reset-password?email=${encodeURIComponent(email)}`
+                : '/auth/reset-password'
+            }
+            className="link"
+          >
             パスワードを忘れた場合
           </Link>
         </p>
