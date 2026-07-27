@@ -1,10 +1,11 @@
 import Link from 'next/link';
+import AuthNavItem from '@/components/auth/AuthNavItem';
 
 /**
  * 共通ナビゲーション
  *
- * 認証関連の導線（サインイン / 表示名など）は、認証画面が用意できる
- * ステップ以降で追加する。
+ * 認証状態に依存するのは AuthNavItem だけで、こちらはサーバーコンポーネント
+ * のまま置く。ナビ全体をクライアント側に倒す必要はない。
  */
 export default function AppNav() {
   return (
@@ -23,6 +24,7 @@ export default function AppNav() {
           <Link href="/settings" className="btn btn-ghost btn-sm">
             設定
           </Link>
+          <AuthNavItem />
         </nav>
       </div>
     </header>
