@@ -1,5 +1,11 @@
 import { TRIAL_LIMITS, TrialLimitError } from '@/lib/recipes/limits';
 import type { Label, Recipe, RecipeInput } from '@/lib/recipes/types';
+import {
+  readLabels,
+  readRecipes,
+  writeLabels,
+  writeRecipes,
+} from './guest-storage';
 import type { RecipeRepository } from './recipe-repository';
 
 /**
@@ -15,40 +21,24 @@ import type { RecipeRepository } from './recipe-repository';
  *
  * localStorage の内容が改竄されても被害はその端末の利用者自身に閉じるため、
  * サーバー側での強制は不要。
+ *
+ * 保存先の読み書きは guest-storage に集約してある。引き継ぎ処理（§5.3）も
+ * 同じ領域を触るため、キーと形式の定義を1箇所に留める。
  */
-
-const RECIPES_KEY = 'recipe-base:recipes';
-const LABELS_KEY = 'recipe-base:labels';
 
 const newId = (): string => crypto.randomUUID();
 
-const read = <T>(key: string): T[] => {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    // 壊れた値が入っていても、空として扱い操作を継続させる
-    return [];
-  }
-};
-
-const write = <T>(key: string, value: T[]): void => {
-  localStorage.setItem(key, JSON.stringify(value));
-};
-
 export class LocalStorageRepository implements RecipeRepository {
   async listRecipes(): Promise<Recipe[]> {
-    return read<Recipe>(RECIPES_KEY);
+    return readRecipes();
   }
 
   async getRecipe(id: string): Promise<Recipe | null> {
-    return read<Recipe>(RECIPES_KEY).find((r) => r.id === id) ?? null;
+    return readRecipes().find((r) => r.id === id) ?? null;
   }
 
   async createRecipe(input: RecipeInput): Promise<Recipe> {
-    const recipes = read<Recipe>(RECIPES_KEY);
+    const recipes = readRecipes();
 
     if (recipes.length >= TRIAL_LIMITS.recipes) {
       throw new TrialLimitError('recipes', TRIAL_LIMITS.recipes);
@@ -60,12 +50,12 @@ export class LocalStorageRepository implements RecipeRepository {
       id: newId(),
       updatedAt: new Date().toISOString(),
     };
-    write(RECIPES_KEY, [...recipes, recipe]);
+    writeRecipes([...recipes, recipe]);
     return recipe;
   }
 
   async updateRecipe(id: string, input: RecipeInput): Promise<Recipe> {
-    const recipes = read<Recipe>(RECIPES_KEY);
+    const recipes = readRecipes();
     const index = recipes.findIndex((r) => r.id === id);
     if (index === -1) {
       throw new Error(`レシピが見つかりません: ${id}`);
@@ -81,50 +71,44 @@ export class LocalStorageRepository implements RecipeRepository {
       updatedAt: new Date().toISOString(),
     };
     recipes[index] = updated;
-    write(RECIPES_KEY, recipes);
+    writeRecipes(recipes);
     return updated;
   }
 
   async deleteRecipe(id: string): Promise<void> {
-    const recipes = read<Recipe>(RECIPES_KEY);
-    write(
-      RECIPES_KEY,
-      recipes.filter((r) => r.id !== id),
-    );
+    const recipes = readRecipes();
+    writeRecipes(recipes.filter((r) => r.id !== id));
   }
 
   async listLabels(): Promise<Label[]> {
-    return read<Label>(LABELS_KEY);
+    return readLabels();
   }
 
   async createLabel(name: string): Promise<Label> {
-    const labels = read<Label>(LABELS_KEY);
+    const labels = readLabels();
 
     if (labels.length >= TRIAL_LIMITS.labels) {
       throw new TrialLimitError('labels', TRIAL_LIMITS.labels);
     }
 
     const label: Label = { id: newId(), name };
-    write(LABELS_KEY, [...labels, label]);
+    writeLabels([...labels, label]);
     return label;
   }
 
   async deleteLabel(id: string): Promise<void> {
-    const labels = read<Label>(LABELS_KEY);
-    write(
-      LABELS_KEY,
-      labels.filter((l) => l.id !== id),
-    );
+    const labels = readLabels();
+    writeLabels(labels.filter((l) => l.id !== id));
 
     // 参照している全レシピから ID を取り除く（§1.6）。
     // レシピ自体は削除しない
-    const recipes = read<Recipe>(RECIPES_KEY);
+    const recipes = readRecipes();
     const cleaned = recipes.map((recipe) =>
       recipe.labelIds.includes(id)
         ? { ...recipe, labelIds: recipe.labelIds.filter((l) => l !== id) }
         : recipe,
     );
-    write(RECIPES_KEY, cleaned);
+    writeRecipes(cleaned);
   }
 }
 

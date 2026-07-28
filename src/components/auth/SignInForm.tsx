@@ -3,7 +3,9 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'aws-amplify/auth';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import GuestImportDialog from '@/components/auth/GuestImportDialog';
+import { useGuestImport } from '@/hooks/use-guest-import';
 import { ensureAccountReady } from '@/lib/auth/account';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { safeRedirect } from '@/lib/auth/redirect';
@@ -25,6 +27,14 @@ export default function SignInForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const goToDestination = useCallback(() => {
+    router.push(redirect);
+    // サーバーコンポーネント側も認証済みとして描画し直す
+    router.refresh();
+  }, [redirect, router]);
+
+  const guestImport = useGuestImport(goToDestination);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -38,9 +48,10 @@ export default function SignInForm() {
           // チームが無いユーザーをここで救う（§2.7）。これを通さないと
           // 以降のレシピ操作が全て Unauthorized になる
           await ensureAccountReady();
-          router.push(redirect);
-          // サーバーコンポーネント側も認証済みとして描画し直す
-          router.refresh();
+          // ゲストデータの引き継ぎは確認してから（§5.5）。既にレシピを持つ
+          // チームに、試し打ちのダミーが黙って混入するのを防ぐ。
+          // 引き継ぐものが無ければ、そのまま遷移する
+          await guestImport.begin('ask');
           return;
 
         case 'CONFIRM_SIGN_UP':
@@ -67,6 +78,14 @@ export default function SignInForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <GuestImportDialog
+        phase={guestImport.phase}
+        counts={guestImport.counts}
+        onImport={guestImport.run}
+        onDiscard={guestImport.discard}
+        onLater={guestImport.skip}
+      />
+
       {error && (
         <div role="alert" className="alert alert-error">
           <span>{error}</span>

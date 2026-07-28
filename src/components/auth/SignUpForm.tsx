@@ -9,7 +9,9 @@ import {
   resendSignUpCode,
   signUp,
 } from 'aws-amplify/auth';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import GuestImportDialog from '@/components/auth/GuestImportDialog';
+import { useGuestImport } from '@/hooks/use-guest-import';
 import { ensureAccountReady } from '@/lib/auth/account';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { PASSWORD_RULE, validatePassword } from '@/lib/auth/password';
@@ -43,6 +45,13 @@ export default function SignUpForm() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const goToRecipes = useCallback(() => {
+    router.push(DEFAULT_REDIRECT);
+    router.refresh();
+  }, [router]);
+
+  const guestImport = useGuestImport(goToRecipes);
 
   const handleSignUp = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -116,9 +125,10 @@ export default function SignUpForm() {
       // post-confirmation が失敗していた場合の復旧（§2.7）
       await ensureAccountReady();
 
-      // ゲストで作成したレシピの引き継ぎ（§5.3 / §5.5）はステップ9 で追加する
-      router.push(DEFAULT_REDIRECT);
-      router.refresh();
+      // ゲストで作成したデータは確認せずに取り込む（§5.5）。登録直後は
+      // 連続性への期待が最も高く、ダイアログは邪魔にしかならない。
+      // 引き継ぐものが無ければ、そのまま遷移する
+      await guestImport.begin('auto');
     } catch (caught) {
       console.error(caught);
       setError(authErrorMessage(caught, '確認に失敗しました'));
@@ -140,6 +150,14 @@ export default function SignUpForm() {
 
   const alerts = (
     <>
+      <GuestImportDialog
+        phase={guestImport.phase}
+        counts={guestImport.counts}
+        onImport={guestImport.run}
+        onDiscard={guestImport.discard}
+        onLater={guestImport.skip}
+      />
+
       {error && (
         <div role="alert" className="alert alert-error">
           <span>{error}</span>
