@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import AppNav from "@/components/AppNav";
 import ConfigureAmplify from "@/components/ConfigureAmplify";
+import GuestImportToast from "@/components/GuestImportToast";
 import ThemeScript from "@/components/ThemeScript";
 import "./globals.css";
 
@@ -40,6 +41,8 @@ export default function RootLayout({
         <ConfigureAmplify />
         <AppNav />
         {children}
+        {/* 引き継ぎの結果は認証画面ではなく遷移先で伝えるため、共通レイアウトに置く（§5.5） */}
+        <GuestImportToast />
       </body>
     </html>
   );
