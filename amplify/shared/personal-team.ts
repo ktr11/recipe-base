@@ -10,10 +10,10 @@ import type { Schema } from '../data/resource';
 export type DataClient = ReturnType<typeof generateClient<Schema>>;
 
 /**
- * 個人チームの生成（docs/design.md §2.4）
+ * チームの生成（docs/design.md §2.4）
  *
- * サインアップ時（postConfirmation）と、自己修復時（repairAccount）の
- * 両方から呼ばれるため共有モジュールに置く。
+ * サインアップ時（postConfirmation）、自己修復時（repairAccount）、
+ * 離脱時（leaveTeam）から呼ばれるため共有モジュールに置く。
  *
  * 設計上、全ユーザーは常に何らかのチームに属する。「個人」はメンバー1人の
  * チームとして表現され、専用の概念を持たない（§0 変更点2）。
@@ -21,12 +21,18 @@ export type DataClient = ReturnType<typeof generateClient<Schema>>;
  * Cognito のグループ名は teamId の値そのものにする。これにより全モデルの
  * 認可が allow.groupDefinedIn('teamId') の1本に統一される（§1.2）。
  */
-export const createPersonalTeam = async (params: {
+
+/**
+ * チームの器（Cognito グループ + Team レコード）だけを作る。
+ *
+ * サインアップ時は UserProfile も新規作成するが（createPersonalTeam）、
+ * 離脱時は既存の UserProfile の teamId を付け替える（leaveTeam / §2.6）。
+ * 分けているのはその差だけで、器の作り方は共通。
+ */
+export const createTeamWithGroup = async (params: {
   client: DataClient;
   cognito: CognitoIdentityProviderClient;
   userPoolId: string;
-  /** Cognito の sub。UserProfile.userId に入る値 */
-  userId: string;
   /**
    * Cognito の username。Admin API に渡す値。
    *
@@ -35,10 +41,8 @@ export const createPersonalTeam = async (params: {
    * それに依存せず、それぞれ由来の正しい値を使う。
    */
   cognitoUsername: string;
-  displayName: string;
 }): Promise<string> => {
-  const { client, cognito, userPoolId, userId, cognitoUsername, displayName } =
-    params;
+  const { client, cognito, userPoolId, cognitoUsername } = params;
 
   const teamId = randomUUID();
 
@@ -69,6 +73,22 @@ export const createPersonalTeam = async (params: {
   if (team.errors) {
     throw new Error(`Team の作成に失敗: ${JSON.stringify(team.errors)}`);
   }
+
+  return teamId;
+};
+
+export const createPersonalTeam = async (params: {
+  client: DataClient;
+  cognito: CognitoIdentityProviderClient;
+  userPoolId: string;
+  /** Cognito の sub。UserProfile.userId に入る値 */
+  userId: string;
+  cognitoUsername: string;
+  displayName: string;
+}): Promise<string> => {
+  const { client, userId, displayName } = params;
+
+  const teamId = await createTeamWithGroup(params);
 
   const profile = await client.models.UserProfile.create({
     userId,

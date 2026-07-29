@@ -79,8 +79,18 @@ const groupManagementPolicy = new Policy(policyStack, 'GroupManagement', {
   statements: [
     new PolicyStatement({
       sid: 'AllowCognitoGroupManagement',
-      // cognito-idp:* は付与しない。必要な2操作のみに限定する。
-      actions: ['cognito-idp:CreateGroup', 'cognito-idp:AdminAddUserToGroup'],
+      // cognito-idp:* は付与しない。必要な操作のみに限定する。
+      //
+      // AdminListGroupsForUser は設計書 §2.2 の一覧に無いが、repairAccount が
+      // 「中断した joinTeam の痕跡（現在の所属以外のグループ）」を見つけるために要る。
+      // 所属を列挙できなければ、旧チームに残ったレシピを拾えない（§2.7 の3）。
+      actions: [
+        'cognito-idp:CreateGroup',
+        'cognito-idp:DeleteGroup',
+        'cognito-idp:AdminAddUserToGroup',
+        'cognito-idp:AdminRemoveUserFromGroup',
+        'cognito-idp:AdminListGroupsForUser',
+      ],
       resources: [backend.auth.resources.userPool.userPoolArn],
     }),
   ],
