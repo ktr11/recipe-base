@@ -45,15 +45,19 @@ export default function AuthNavItem() {
     }
   };
 
-  // /team への導線は、その画面ができるステップ10 で足す
   return (
-    <button
-      type="button"
-      className="btn btn-ghost btn-sm"
-      onClick={handleSignOut}
-      disabled={signingOut}
-    >
-      サインアウト
-    </button>
+    <>
+      <Link href="/team" className="btn btn-ghost btn-sm">
+        チーム
+      </Link>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={handleSignOut}
+        disabled={signingOut}
+      >
+        サインアウト
+      </button>
+    </>
   );
 }
