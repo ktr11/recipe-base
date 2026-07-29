@@ -177,8 +177,10 @@ describe('同じチームのメンバー同士は編集できること', () => {
   beforeAll(async () => {
     owner = await createTestUser();
     const joiner = await createTestUser();
-    // joinTeam はステップ10 で実装するため、Cognito グループの
-    // 付け替えで「同じチームに2人いる」状態を作る
+    // joinTeam ではなく Cognito グループの付け替えで「同じチームに2人いる」
+    // 状態を作る。ここで検証したいのは認可であって参加処理の成否ではなく、
+    // 混ぜると失敗時にどちらが壊れたのか分からなくなる（参加処理そのものは
+    // team.test.ts で検証する）
     member = await moveUserToTeam(joiner, owner.teamId);
     recipe = await createRecipe(owner, 'みんなのカレー');
   });
