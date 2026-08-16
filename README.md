@@ -83,9 +83,14 @@ src/app/          Next.js の App Router
 docs/
   design.md       設計書（実装の判断根拠はすべてここにある）
   initial.md      当初の要件定義
+  index.html …    解説サイト（GitHub Pages で配信）
 ```
 
 ## 設計について
+
+構成・技術スタック・設計思想の要約は **解説サイト**（<https://ktr11.github.io/recipe-base/>）
+にまとめてある。スマートフォンからでも読める。実体は `docs/` 配下の静的 HTML で、
+GitHub Pages が main ブランチの `/docs` フォルダをそのまま配信している（ビルド無し）。
 
 **実装前に `docs/design.md` を読むこと。** 一見不自然に見える設計判断の多くは、
 AWS 側の制約を踏まえた意図的なものであり、理由が設計書に記録されている。例:
