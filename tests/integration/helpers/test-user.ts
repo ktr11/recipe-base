@@ -117,11 +117,26 @@ export const signInTestUser = async (user: TestUser): Promise<void> => {
 export const signOutTestUser = (): Promise<void> => signOut();
 
 /**
+ * ID トークンを取り直す。
+ *
+ * joinTeam / leaveTeam は Cognito グループの所属を変えるが、**発行済みの
+ * トークンには反映されない**。取り直すまで、参加したはずのチームのデータが
+ * 読めないままになる（§2.5 の最後にクライアントが forceRefresh するのと同じ理由）。
+ */
+export const refreshIdToken = async (
+  user: TestUser,
+  teamId: string,
+): Promise<TestUser> => {
+  const idToken = await signInAs(user.email);
+  return { ...user, teamId, idToken };
+};
+
+/**
  * 別のユーザーを、指定チームのメンバーにする。
  *
- * joinTeam はステップ10 で実装するため、現時点では Cognito グループの
- * 付け替えを直接行って「同じチームに2人いる」状態を作る。
- * joinTeam が行う処理のうち、認可に効く部分だけを再現している。
+ * Cognito グループの付け替えだけを行い、joinTeam のデータ移送は再現しない。
+ * 認可のテストが必要とするのは「同じチームに2人いる」状態だけで、
+ * そこに joinTeam の成否を混ぜると何を検証しているのか分からなくなるため。
  */
 export const moveUserToTeam = async (
   user: TestUser,

@@ -17,15 +17,14 @@ export default function LandingActions() {
     return <span className="loading loading-spinner" aria-label="読み込み中" />;
   }
 
-  // /team への導線は、その画面ができるステップ10 で足す
   if (!guest) {
     return (
       <div className="flex flex-wrap justify-center gap-2">
         <Link href="/recipes" className="btn btn-primary">
           レシピを見る
         </Link>
-        <Link href="/settings" className="btn btn-ghost">
-          設定
+        <Link href="/team" className="btn btn-ghost">
+          チーム
         </Link>
       </div>
     );

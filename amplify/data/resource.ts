@@ -16,11 +16,9 @@ import { teamFunction } from '../functions/team/resource';
  * これを成立させるため、Cognito のグループ名は teamId の値そのものとする。
  * Team モデルは teamId を主キーに宣言し、自動採番の id を使わない。
  *
- * なお、以下は本ステップの範囲外であり、Lambda 実装時（実装順序ステップ3・10）に
- * 追加する:
- *   - allow.resource(teamFunction) によるバックエンドからの書き込み許可
- *   - UserProfile.teamId のフィールドレベル認可（§1.7 の弱点を塞ぐ）
- *   - joinTeam / leaveTeam / issueInviteCode / repairAccount のカスタムミューテーション
+ * カスタムミューテーション（joinTeam / leaveTeam / issueInviteCode /
+ * repairAccount）はすべて teamFunction に集約する。Cognito グループの作成と
+ * 所属変更は Admin API でしか行えず、クライアントからは実行できないため（§2.2）。
  */
 const schema = a.schema({
   /**
@@ -105,7 +103,22 @@ const schema = a.schema({
   UserProfile: a
     .model({
       userId: a.id().required(),
-      teamId: a.id().required(),
+      /**
+       * 所属チーム。§1.7 の弱点を塞ぐため、フィールド単位で書き込みを禁じる。
+       *
+       * モデル全体の owner 認可は update を許すので、これが無いと本人が
+       * teamId を任意の値に書き換えられる。対応する Cognito グループを
+       * 持たないためレシピは読めないが、他チームのメンバー一覧に自分が
+       * 現れてしまう。所属の変更は joinTeam / leaveTeam（IAM）の責務であり、
+       * クライアントからは読めるだけでよい。
+       */
+      teamId: a
+        .id()
+        .required()
+        .authorization((allow) => [
+          allow.ownerDefinedIn('userId').identityClaim('sub').to(['read']),
+          allow.groupDefinedIn('teamId').to(['read']),
+        ]),
       displayName: a.string().required(),
       theme: a.string().required().default('light'),
     })
@@ -135,6 +148,58 @@ const schema = a.schema({
   repairAccount: a
     .mutation()
     .returns(a.ref('RepairAccountResult'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
+
+  /**
+   * 招待コードの発行（§2.3）
+   *
+   * メンバー全員が発行できる。チーム内にロールの概念を持たないため。
+   * Team.inviteCode は1フィールドなので、再発行すると旧コードは自動的に
+   * 無効になる。
+   */
+  IssueInviteCodeResult: a.customType({
+    inviteCode: a.string().required(),
+    expiresAt: a.string().required(),
+  }),
+
+  issueInviteCode: a
+    .mutation()
+    .returns(a.ref('IssueInviteCodeResult'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
+
+  /**
+   * 招待コードによるチーム参加（§2.5）
+   *
+   * ⚠️ Lambda でなければ実装できない。招待コードを入力する人はまだその
+   * チームのメンバーではないため、クライアントから Team を読んで照合する
+   * ことが原理的にできない（読めるなら誰でも全チームのコードを列挙できる）。
+   */
+  JoinTeamResult: a.customType({
+    teamId: a.string().required(),
+    teamName: a.string().required(),
+  }),
+
+  joinTeam: a
+    .mutation()
+    .arguments({ inviteCode: a.string().required() })
+    .returns(a.ref('JoinTeamResult'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
+
+  /**
+   * チームからの離脱（§2.6）
+   *
+   * 離脱者はレシピを一切持ち出さない。新しい個人チームに移る。
+   */
+  LeaveTeamResult: a.customType({
+    teamId: a.string().required(),
+  }),
+
+  leaveTeam: a
+    .mutation()
+    .returns(a.ref('LeaveTeamResult'))
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(teamFunction)),
 })
