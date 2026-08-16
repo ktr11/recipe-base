@@ -1,0 +1,430 @@
+/* recipe-base 解説サイト
+   外部フォント・CDN に依存しない単一スタイルシート。
+   スマートフォンでの閲覧を前提に、幅の狭い側から書いている。 */
+
+:root {
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --text: #1f2328;
+  --muted: #5b6470;
+  --border: #e2e5e9;
+  --accent: #2f6f4f;
+  --accent-soft: #e7f2ec;
+  --warn: #9a5b00;
+  --warn-soft: #fdf3e2;
+  --danger: #a8342c;
+  --code-bg: #f5f6f7;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --surface: #1c2024;
+    --surface-2: #23282d;
+    --text: #e6e8ea;
+    --muted: #a3acb6;
+    --border: #333a41;
+    --accent: #7fc4a0;
+    --accent-soft: #1e2b25;
+    --warn: #e0ac5f;
+    --warn-soft: #2b2419;
+    --danger: #e58b83;
+    --code-bg: #22272b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo,
+    system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+}
+
+/* ---------- ヘッダー / ナビゲーション ---------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.site-header .inner {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 0.7rem 1rem 0;
+}
+
+.site-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.site-title a { color: var(--text); text-decoration: none; }
+
+.site-title .sub {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+nav.site-nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.6rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+nav.site-nav::-webkit-scrollbar { display: none; }
+
+nav.site-nav a {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.83rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+nav.site-nav a[aria-current="page"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------- レイアウト ---------- */
+
+main {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  line-height: 1.5;
+  margin: 0.5rem 0 0.3rem;
+  letter-spacing: 0;
+}
+
+.lede {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin: 0 0 2rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin: 2.8rem 0 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  line-height: 1.6;
+}
+
+h3 {
+  font-size: 1rem;
+  margin: 1.9rem 0 0.6rem;
+  line-height: 1.6;
+}
+
+p { margin: 0.9rem 0; }
+
+ul, ol { padding-left: 1.3rem; margin: 0.9rem 0; }
+li { margin: 0.4rem 0; }
+
+a { color: var(--accent); }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+strong { font-weight: 700; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  background: var(--code-bg);
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  word-break: break-word;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+pre code { background: none; padding: 0; font-size: inherit; }
+
+/* ---------- 表（スマホでは横スクロール） ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 1.1rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 460px;
+  font-size: 0.87rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  line-height: 1.7;
+}
+
+thead th {
+  background: var(--surface-2);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+tbody tr:last-child td { border-bottom: 0; }
+
+/* ---------- 注記ボックス ---------- */
+
+.note {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin: 1.3rem 0;
+  font-size: 0.9rem;
+}
+
+.note.warn {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.note > :first-child { margin-top: 0; }
+.note > :last-child { margin-bottom: 0; }
+
+.note .label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+/* ---------- 判断カード ---------- */
+
+.decision {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1rem 1.1rem;
+  margin: 1.2rem 0;
+}
+
+.decision h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1rem;
+}
+
+.decision dl { margin: 0; font-size: 0.9rem; }
+
+.decision dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-top: 0.75rem;
+}
+
+.decision dt:first-child { margin-top: 0; }
+
+.decision dd { margin: 0.15rem 0 0; }
+
+.decision .ref {
+  display: inline-block;
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* ---------- 図（縦積みのボックス） ---------- */
+
+.diagram {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1rem;
+  margin: 1.3rem 0;
+  font-size: 0.85rem;
+}
+
+.tier {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 0.7rem 0.85rem;
+  margin: 0.5rem 0;
+}
+
+.tier .tier-name {
+  font-weight: 700;
+  font-size: 0.82rem;
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.tier .tier-body { color: var(--muted); font-size: 0.83rem; line-height: 1.7; }
+
+.arrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.2;
+  margin: 0.1rem 0;
+}
+
+.split { display: grid; gap: 0.5rem; }
+
+@media (min-width: 640px) {
+  .split.two { grid-template-columns: 1fr 1fr; }
+  .split.three { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+/* ---------- 手順（番号付きの流れ） ---------- */
+
+ol.flow {
+  list-style: none;
+  padding: 0;
+  margin: 1.2rem 0;
+  counter-reset: flow;
+}
+
+ol.flow > li {
+  counter-increment: flow;
+  position: relative;
+  padding: 0.55rem 0 0.55rem 2.4rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+ol.flow > li:last-child { border-bottom: 0; }
+
+ol.flow > li::before {
+  content: counter(flow);
+  position: absolute;
+  left: 0;
+  top: 0.62rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+ol.flow > li .why {
+  display: block;
+  color: var(--muted);
+  font-size: 0.83rem;
+  margin-top: 0.15rem;
+}
+
+/* ---------- カードリンク（目次） ---------- */
+
+.cards { display: grid; gap: 0.7rem; margin: 1.3rem 0; }
+
+@media (min-width: 640px) {
+  .cards { grid-template-columns: 1fr 1fr; }
+}
+
+.card {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.9rem 1rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card .card-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--accent);
+  display: block;
+}
+
+.card .card-desc {
+  display: block;
+  font-size: 0.83rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+  line-height: 1.7;
+}
+
+/* ---------- 補助 ---------- */
+
+.pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pill.ok { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.pill.no { color: var(--danger); border-color: var(--danger); background: transparent; }
+
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 3rem;
+  padding: 1.3rem 1rem 2.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.site-footer a { color: var(--muted); }

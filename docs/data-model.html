@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>データと認可 | recipe-base 設計ガイド</title>
+<meta name="description" content="recipe-base のデータモデル4種と認可ルール、チームのライフサイクル（サインアップ・参加・離脱・自己修復）。">
+<link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <p class="site-title"><a href="./">recipe-base 設計ガイド<span class="sub">レシピ保存・家族共有アプリ / Next.js + AWS Amplify Gen 2</span></a></p>
+    <nav class="site-nav">
+      <a href="./">概要</a>
+      <a href="./architecture.html">構成と動き</a>
+      <a href="./data-model.html" aria-current="page">データと認可</a>
+      <a href="./decisions.html">設計判断</a>
+      <a href="./operations.html">開発と運用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>データと認可</h1>
+<p class="lede">
+モデルは4つしかない。そして認可ルールは全モデルで同じ1本。この単純さは意図して作られたもので、
+守らなければならない不変条件でもある。
+</p>
+
+<h2>中心にある1つの規則</h2>
+
+<div class="note">
+  <p><strong>すべてのデータは <code>teamId</code> を持ち、認可は「その <code>teamId</code> と同名の
+  Cognito グループに所属しているか」の1問に還元される。</strong></p>
+  <p style="margin-bottom:0" class="small">
+  実装としては、4モデルすべてが <code>allow.groupDefinedIn('teamId')</code> を使う。
+  <strong>所有者ベースの認可とグループ認可を混在させないこと。</strong>混ぜた時点でこの設計は壊れる。</p>
+</div>
+
+<p>
+これを成立させるため、<strong>Cognito のグループ名は <code>teamId</code> の値そのもの</strong>にしてある。
+<code>Team</code> モデルは <code>teamId</code> を主キーに宣言し、Amplify が自動採番する <code>id</code> を使わない。
+<code>teamId</code> は Lambda が <code>crypto.randomUUID()</code> で採番する（順序性が要らないので ULID の依存を足す理由がない）。
+</p>
+
+<p>
+そして<strong>全ユーザーが常に、ちょうど1つのチームに属する</strong>。
+サインアップ時に「自分1人のチーム」が自動生成される。これにより
+UI から個人モード / チームモードの切り替えが消え、認可ルールも1本に保たれる。
+</p>
+
+<h2>モデル一覧</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>モデル</th><th>主キー</th><th>主なフィールド</th><th>役割</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>Team</code></td>
+  <td><code>teamId</code></td>
+  <td><code>name</code>, <code>inviteCode</code>, <code>inviteCodeExpiresAt</code>, <code>memberCount</code></td>
+  <td>データの所属単位。個人も「メンバー1人のチーム」</td>
+</tr>
+<tr>
+  <td><code>Recipe</code></td>
+  <td>自動採番 <code>id</code></td>
+  <td><code>teamId</code>, <code>title</code>, <code>url</code>, <code>servings</code>, <code>ingredients</code>, <code>labelIds</code>, <code>memo</code>, <code>imageKey</code></td>
+  <td>レシピ本体。材料とラベル参照を<strong>埋め込み</strong>で持つ</td>
+</tr>
+<tr>
+  <td><code>Label</code></td>
+  <td>自動採番 <code>id</code></td>
+  <td><code>teamId</code>, <code>name</code></td>
+  <td>ラベル。名前のみで色は持たない</td>
+</tr>
+<tr>
+  <td><code>UserProfile</code></td>
+  <td><code>userId</code>（Cognito の <code>sub</code>）</td>
+  <td><code>teamId</code>, <code>displayName</code>, <code>theme</code></td>
+  <td>表示名・テーマ・所属チーム。<strong>Cognito 属性のチーム内向け投影</strong></td>
+</tr>
+<tr>
+  <td><code>Ingredient</code></td>
+  <td>—</td>
+  <td><code>name</code>, <code>quantity</code>, <code>unit</code></td>
+  <td><strong>テーブルではない</strong>（<code>customType</code>）。<code>Recipe</code> に埋め込まれる</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>ゲスト用のモデルは存在しない。</strong>ゲストのデータは AWS 上に一切保存されない。</p>
+
+<p class="small muted">
+<code>UserProfile</code> が必要な理由：クライアントから他ユーザーの Cognito 属性は読めず、
+Cognito グループのメンバー一覧も Admin API なしには取得できない。
+そのため表示名とチーム所属を DynamoDB 側にも持ち、メンバー一覧を1クエリで引けるようにしている。
+</p>
+
+<h2>認可ルール</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>モデル</th><th>ルール</th><th>できること</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>Team</code></td>
+  <td><code>groupDefinedIn('teamId')</code></td>
+  <td><strong>read / update のみ。</strong>作成・削除は Lambda（IAM）だけが行う</td>
+</tr>
+<tr>
+  <td><code>Recipe</code></td>
+  <td><code>groupDefinedIn('teamId')</code></td>
+  <td>同チームなら全操作</td>
+</tr>
+<tr>
+  <td><code>Label</code></td>
+  <td><code>groupDefinedIn('teamId')</code></td>
+  <td>同チームなら全操作</td>
+</tr>
+<tr>
+  <td><code>UserProfile</code></td>
+  <td><code>ownerDefinedIn('userId').identityClaim('sub')</code><br><code>groupDefinedIn('teamId')</code></td>
+  <td>本人は read / update、同チームは read のみ。<br><strong><code>teamId</code> フィールドだけは本人にも read のみ</strong></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h3>ここに埋まっている2つの罠</h3>
+
+<div class="note warn">
+  <span class="label">罠 1 — <code>identityClaim('sub')</code> の明示</span>
+  <code>ownerDefinedIn</code> の既定の claim は <code>cognito:username</code> だが、
+  <code>UserProfile.userId</code> には <code>sub</code> を入れる設計になっている。
+  メールをサインイン属性にした場合 Cognito は username として UUID を採番し実質 <code>sub</code> と一致するが、
+  <strong>その一致に依存した実装をしない</strong>ため claim 側を <code>sub</code> に固定してある。
+  同じ理由で、Admin API に渡すのは <code>event.userName</code>、<code>UserProfile</code> に入れるのは
+  <code>event.request.userAttributes.sub</code> と、出所を使い分ける。
+</div>
+
+<div class="note warn">
+  <span class="label">罠 2 — <code>teamId</code> のフィールドレベル認可</span>
+  モデル全体の owner 認可は <code>update</code> を許すため、これが無いと本人が <code>teamId</code> を
+  任意の値に書き換えられる。対応する Cognito グループを持たないのでレシピは読めないが、
+  <strong>他チームのメンバー一覧に自分が現れてしまう。</strong>
+  所属の変更は <code>joinTeam</code> / <code>leaveTeam</code>（IAM）の責務であり、
+  クライアントからは読めるだけでよい。
+</div>
+
+<h2>チームのライフサイクル</h2>
+
+<h3>1. サインアップ — 個人チームの自動生成</h3>
+
+<p>Cognito の <code>post-confirmation</code> トリガーが実行する（§2.4）。</p>
+
+<ol class="flow">
+  <li><code>teamId</code> を生成（<code>crypto.randomUUID()</code>）</li>
+  <li>Cognito グループ <code>${teamId}</code> を作成</li>
+  <li>ユーザーをそのグループに追加</li>
+  <li><code>Team</code> レコードを作成（name: 「マイレシピ」, memberCount: 1）</li>
+  <li><code>UserProfile</code> を作成（userId: <code>sub</code>, displayName: メールのローカル部）</li>
+  <li>クライアントが <code>fetchAuthSession({ forceRefresh: true })</code> で新グループのクレームを取得
+    <span class="why">これをしないと、作ったばかりのチームのデータが読めない</span></li>
+</ol>
+
+<div class="note warn">
+  <span class="label">このトリガーが失敗したら</span>
+  <strong>ユーザーの確認自体は既に完了している。</strong>結果「確認済みだがチームが無い」ユーザーが生まれ、
+  以後すべての画面が空になる。トリガー内で例外を投げても確認済み状態は取り消せず体験が悪化するだけなので、
+  <strong>投げない</strong>。失敗はログに残し、復旧は下の <code>repairAccount</code> に委ねる。
+</div>
+
+<h3>2. 招待コードによる参加 — <code>joinTeam</code></h3>
+
+<p><strong>この順序に意味がある</strong>（§2.5）。</p>
+
+<ol class="flow">
+  <li>呼び出し元の <code>sub</code> を <code>event.identity</code> から取得</li>
+  <li><code>inviteCode</code> で <code>Team</code> を検索 <span class="why">見つからなければ「無効なコード」</span></li>
+  <li><code>inviteCodeExpiresAt &gt; now</code> を検証 <span class="why">失効なら「期限切れ」</span></li>
+  <li><code>memberCount &lt; 20</code> を検証 <span class="why">超過なら「満員」</span></li>
+  <li>参加先が現在の所属と同じでないか検証</li>
+  <li><strong>新チームの Cognito グループにユーザーを追加</strong> <span class="why">先に権限を付与する。途中で失敗しても新旧どちらかのグループには必ず所属している状態を保つため</span></li>
+  <li><strong>旧チームが1人チームの場合のみ</strong> <code>Recipe</code> / <code>Label</code> の <code>teamId</code> を書き換え
+    <span class="why">旧チームに他メンバーが残る経路が実際にあり、全件移すと残る人からレシピを奪うことになる（実装時に判明した条件）</span></li>
+  <li><code>UserProfile.teamId</code> を更新</li>
+  <li>新チームの <code>memberCount</code> をインクリメント</li>
+  <li>旧チームの後始末 <span class="why">1人チームなら Team レコードとグループを削除。他にメンバーが居れば memberCount を減らして自分だけグループから外れる（グループごと消える場合は <code>AdminRemoveUserFromGroup</code> を呼ばない）</span></li>
+  <li>クライアントが <code>fetchAuthSession({ forceRefresh: true })</code> → <code>/recipes</code> へ</li>
+</ol>
+
+<h3>3. 離脱 — <code>leaveTeam</code></h3>
+
+<p><strong>離脱者はレシピを一切持ち出さない</strong>（確定事項）。</p>
+
+<ol class="flow">
+  <li>新しい個人チーム（<code>teamId</code>・Cognito グループ・<code>Team</code> レコード）を作成</li>
+  <li>ユーザーを新グループに追加</li>
+  <li><code>UserProfile.teamId</code> を新個人チームへ更新</li>
+  <li>旧チームの <code>memberCount</code> をデクリメント</li>
+  <li>結果が 0 なら旧チームの <code>Recipe</code> / <code>Label</code> を全削除し、<code>Team</code> とグループを削除</li>
+  <li>旧 Cognito グループからユーザーを削除</li>
+</ol>
+
+<div class="note warn">
+  <span class="label">UI 側の必須要件</span>
+  離脱ボタンには「<strong>レシピはチームに残り、あなたの手元には残りません</strong>」と明示する確認モーダルを置く。
+  これが無いと、誤操作で自分のレシピを失ったという事故が起きる。
+</div>
+
+<h3>4. 自己修復 — <code>repairAccount</code></h3>
+
+<p>
+<strong>すべてのサインイン後に、クライアントは自分の <code>UserProfile</code> の存在を確認する。</strong>
+無ければこれを呼ぶ。上の2つの中断状態から回復するための仕組み。
+</p>
+
+<ol class="flow">
+  <li><code>UserProfile</code> が無ければ、サインアップと同じ手順で個人チームを新規作成
+    <span class="why"><code>post-confirmation</code> が失敗したケースの救済</span></li>
+  <li><code>UserProfile</code> はあるが対応する Cognito グループに所属していなければ、グループへ追加</li>
+  <li><code>UserProfile.teamId</code> 以外のグループに所属していれば、そこが中断した <code>joinTeam</code> の旧チーム。
+    1人チームなら残った <code>Recipe</code> / <code>Label</code> を現在のチームへ移送して畳み、他にメンバーが居るならグループから外れるだけにする</li>
+</ol>
+
+<p class="small muted">
+3 の検出に<strong>所属グループの列挙</strong>（<code>AdminListGroupsForUser</code>）を使うのは、
+旧チームの <code>teamId</code> を他に知る手がかりが無いため。<code>Recipe</code> を全件走査しても、
+Lambda から見える範囲には他人のチームのデータも含まれ、どれが「自分の旧チーム」か判別できない。
+</p>
+
+<h2>招待コードの仕様</h2>
+
+<div class="table-wrap">
+<table>
+<tbody>
+<tr><td>形式</td><td>大文字英数8桁。紛らわしい <code>0 O 1 I L</code> を除外し、<code>ABCD-2345</code> のようにハイフン区切りで表示。<strong>UUID は口頭・手入力で伝達できない</strong>ので使わない</td></tr>
+<tr><td>有効期限</td><td>発行から<strong>1時間</strong></td></tr>
+<tr><td>発行者</td><td>メンバー全員（チーム内にロールの概念が無いため）</td></tr>
+<tr><td>再発行</td><td><code>Team.inviteCode</code> は1フィールドなので、再発行すれば<strong>旧コードは自動的に無効</strong></td></tr>
+<tr><td>照合</td><td><code>Team</code> の <code>inviteCode</code> セカンダリインデックス（クライアントからは読めない）</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="label">有効期限に DynamoDB の TTL を使ってはならない</span>
+  TTL 削除は best-effort であり、期限到達から<strong>最大48時間</strong>削除が遅れる。
+  TTL に頼ると期限切れコードが2日間有効なままになる。
+  Lambda 側で <code>inviteCodeExpiresAt &gt; now</code> を明示的に比較することが唯一の正解。
+</div>
+
+<h2>参照整合性（ラベル削除）</h2>
+
+<p>
+<code>Recipe.labelIds</code> は ID の配列で、外部キー制約を持たない。3段構えで担保する。
+</p>
+
+<ol class="flow">
+  <li>削除の確認モーダルに「<strong>N件のレシピからこのラベルが外れます</strong>」と件数を表示
+    <span class="why">クライアントに全レシピがあるので即座に数えられる</span></li>
+  <li>削除実行時、該当レシピの <code>labelIds</code> から当該 ID を除く更新をまとめて発行</li>
+  <li><strong>読み込み時に、存在しない <code>labelId</code> は無視する</strong>
+    <span class="why">これが最終防衛線。2 が途中で失敗しても UI 上の不整合は発生しない</span></li>
+</ol>
+
+<h2>トライアル制限（ゲストのみ）</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>対象</th><th>上限</th></tr></thead>
+<tbody>
+<tr><td>レシピ</td><td>3件</td></tr>
+<tr><td>ラベル</td><td>3件</td></tr>
+<tr><td>1レシピあたりの材料</td><td>10個</td></tr>
+</tbody>
+</table>
+</div>
+
+<ul>
+  <li>制限は「累計」ではなく<strong>「同時保有数」</strong>。1件削除すれば1件作れる（累計制は「消したのに作れない」となり試用の妨げにしかならない）</li>
+  <li><strong>登録ユーザーには一切の上限を設けない</strong></li>
+  <li>既に材料10個を持つレシピの<strong>編集は許可</strong>する（保存時に個数が増えていなければ通す）</li>
+  <li>上限到達は<strong>入力を始める前に</strong>伝える。「新規作成」ボタンを無効化し、その場に登録導線を出す。保存時の例外は本来到達しない経路の保険</li>
+  <li>通知に <code>window.alert()</code> は使わない（テーマが適用されず、登録への導線ボタンも置けない）</li>
+</ul>
+
+<h2>ゲストデータの引き継ぎ</h2>
+
+<p>
+ゲストの localStorage には<strong>サーバーの <code>Recipe</code> と同じ形</strong>でデータを持つ。
+形を揃えることで、引き継ぎ処理が単純なループで済む。
+</p>
+
+<ol class="flow">
+  <li>サインアップ → <code>post-confirmation</code> が個人チームを作成</li>
+  <li><code>fetchAuthSession({ forceRefresh: true })</code> で新グループのクレームを取得
+    <span class="why">⚠️ この順序を守らないと、まだ権限のないトークンで書き込むことになり全て Unauthorized になる</span></li>
+  <li><code>UserProfile</code> の存在確認（無ければ <code>repairAccount</code>）</li>
+  <li><strong>先に <code>Label</code> を作成し、ローカル ID → サーバー ID の対応表を作る</strong>
+    <span class="why">順序を逆にすると、ラベルが全て外れたレシピが出来上がる</span></li>
+  <li>レシピの <code>labelIds</code> を置換して登録</li>
+  <li>全件成功してから localStorage をクリア</li>
+</ol>
+
+<div class="note">
+  <span class="label">失敗しても壊れない工夫</span>
+  <p>3件中2件成功して通信が切れる事態は普通に起こる。</p>
+  <ul style="margin-bottom:0">
+    <li>全件成功するまで localStorage をクリアしない</li>
+    <li>各アイテムに印を立て、<strong>印は1件ごとに保存する</strong>（まとめて最後に書くと、途中で切れた分が次の試行で二重登録される）</li>
+    <li>ラベルの印は boolean ではなく<strong>引き継ぎ先のサーバー ID</strong>（<code>migratedId</code>）。boolean だと再試行で対応表を作れず、ラベルの外れたレシピが登録される</li>
+    <li>失敗時は「取り込みに失敗しました。再試行」を表示し、<strong>黙って破棄しない</strong></li>
+  </ul>
+</div>
+
+<h3>新規登録とサインインで扱いを変える</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>状況</th><th>挙動</th></tr></thead>
+<tbody>
+<tr><td>新規サインアップ</td><td>確認なしで自動取り込み。完了後に「ゲストで作成した3件を取り込みました」とトースト</td></tr>
+<tr><td>既存アカウントへのサインイン</td><td>確認モーダル。「追加しない」を選んだ場合のみ localStorage を破棄</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+登録直後は連続性への期待が最も高くダイアログは邪魔にしかならない一方、
+既に多数のレシピを持つ家族チームに試し打ちのダミーが黙って混入するのは防ぐ必要がある。
+<strong>一貫性より実際の期待値を優先した非対称な扱い</strong>。（§5.5）
+</p>
+
+<h2>既知の制約</h2>
+
+<ul>
+  <li>Cognito のグループ数上限（既定 10,000／緩和申請可）が<strong>チーム総数の上限</strong>になる</li>
+  <li>検索は<strong>漢字とかなの揺れを吸収できない</strong>（「玉ねぎ」と「たまねぎ」）。形態素解析辞書が必要になるため v1 の対象外。全角/半角・カタカナ/ひらがな・大文字小文字は吸収する</li>
+  <li>レシピが数千件規模になると初回ロードが重くなる。その時は検索インデックスを足す（<strong>スキーマの変更は不要</strong>）</li>
+</ul>
+
+</main>
+
+<footer class="site-footer">
+  <p>recipe-base — <a href="https://github.com/ktr11/recipe-base">GitHub リポジトリ</a> /
+  <a href="https://github.com/ktr11/recipe-base/blob/main/docs/design.md">設計書 design.md</a></p>
+</footer>
+
+</body>
+</html>

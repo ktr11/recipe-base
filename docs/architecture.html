@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>構成と動き | recipe-base 設計ガイド</title>
+<meta name="description" content="recipe-base の実行時の構成。Repository による保存先の差し替え、画面一覧、データ取得の方針。">
+<link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <p class="site-title"><a href="./">recipe-base 設計ガイド<span class="sub">レシピ保存・家族共有アプリ / Next.js + AWS Amplify Gen 2</span></a></p>
+    <nav class="site-nav">
+      <a href="./">概要</a>
+      <a href="./architecture.html" aria-current="page">構成と動き</a>
+      <a href="./data-model.html">データと認可</a>
+      <a href="./decisions.html">設計判断</a>
+      <a href="./operations.html">開発と運用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>構成と動き</h1>
+<p class="lede">
+画面を開いてから中身が出るまでに何が起きるか、コードのどこがその責任を持っているか。
+</p>
+
+<h2>いちばん重要な構造：保存先の差し替え</h2>
+
+<p>
+このアプリの構造で最初に理解すべきなのは、<strong>ゲストと登録ユーザーが同じ画面を使い、
+違うのはデータ層だけ</strong>という点。
+</p>
+
+<div class="diagram">
+  <div class="tier">
+    <span class="tier-name">画面コンポーネント（<code>src/app/</code>, <code>src/components/</code>）</span>
+    <span class="tier-body">データがどこに保存されるかを<strong>一切知らない</strong></span>
+  </div>
+  <div class="arrow">▼ <code>getRepository()</code> がここで1回だけ分岐する ▼</div>
+  <div class="tier">
+    <span class="tier-name">RecipeRepository（インターフェース）</span>
+    <span class="tier-body"><code>listRecipes / getRecipe / createRecipe / updateRecipe / deleteRecipe</code><br>
+    <code>listLabels / createLabel / deleteLabel</code></span>
+  </div>
+  <div class="split two">
+    <div class="tier">
+      <span class="tier-name">LocalStorageRepository</span>
+      <span class="tier-body">ゲスト。<strong>トライアル上限の強制もここ</strong></span>
+    </div>
+    <div class="tier">
+      <span class="tier-name">AmplifyRepository</span>
+      <span class="tier-body">登録ユーザー。<code>teamId</code> の付与と型変換を担う</span>
+    </div>
+  </div>
+</div>
+
+<p>
+分岐している場所は <code>src/repositories/index.ts</code> の <code>getRepository()</code> 1箇所だけ。
+判定は「<code>fetchAuthSession()</code> がトークンを持っているか」で、
+ゲストは AWS にアクセスしないのでトークンを持たない。
+</p>
+
+<div class="note">
+  <span class="label">なぜ別ルートにしないのか</span>
+  <code>/trial/recipes</code> のような専用ルートを作ると、レシピ UI 一式を2系統保守することになる。
+  片方だけ直して挙動がズレる事故が確実に起きるため採用していない。（§3.3）
+</div>
+
+<p class="small muted">
+インターフェースは <code>localStorage</code> 側が同期的に処理できる場合でも
+<strong>すべて <code>Promise</code> を返す</strong>。契約が実装の都合で分かれると、
+呼び出し側が実装を意識することになり、差し替え可能である意味が無くなるため。
+</p>
+
+<h2>ページを開いたときの流れ</h2>
+
+<ol class="flow">
+  <li><strong><code>&lt;head&gt;</code> のインラインスクリプトがテーマを確定する</strong>
+    <span class="why"><code>ThemeScript</code>。localStorage を<strong>ブロッキングで</strong>読み、描画前に <code>&lt;html data-theme&gt;</code> を書く。これをしないとダークテーマ利用者に白画面が一瞬光る（§6.2）</span></li>
+  <li><strong><code>ConfigureAmplify</code> が <code>Amplify.configure(outputs, { ssr: true })</code> を実行</strong>
+    <span class="why"><code>ssr: true</code> により認証トークンが localStorage ではなく Cookie に保存される。middleware がサーバー側で認証を判定できるのはこのため</span></li>
+  <li><strong><code>useAuth()</code> がゲストか登録ユーザーかを解決する</strong>
+    <span class="why">解決するまではゲスト扱い。「まだ不明な段階でうっかり無制限の UI を見せる」より安全側に倒している。<code>Hub</code> でサインイン/サインアウトも購読しており、共通ナビが古い状態のまま残らない</span></li>
+  <li><strong><code>useRecipes()</code> が Repository からレシピとラベルを読む</strong>
+    <span class="why">マウント時に取得。<code>getRepository()</code> がゲスト/登録ユーザーを判定して実装を返す</span></li>
+  <li><strong>絞り込み・並べ替え・スケーリングはすべてブラウザ内で完結</strong>
+    <span class="why">通信ゼロ。<code>src/lib/recipes/</code> の純粋関数（<code>filterRecipes</code> / <code>sortByUpdatedAtDesc</code> / スケーリング）が担当する</span></li>
+</ol>
+
+<h2>データの鮮度をどう保つか</h2>
+
+<p>
+リアルタイム同期（<code>observeQuery</code>）は<strong>使っていない</strong>。代わりに2つのタイミングで取り直す。
+</p>
+
+<ul>
+  <li><strong>画面をマウントしたとき</strong> — クライアント遷移で戻った場合もフックが再マウントされるので取得される</li>
+  <li><strong>タブにフォーカスが戻ったとき</strong> — <code>visibilitychange</code> が <code>visible</code> になった時のみ。実際にこれが埋めるのは「タブを開いたまま放置して戻ってきた」場合</li>
+  <li>自分の変更は保存後の <code>reload()</code> で反映する</li>
+</ul>
+
+<p class="small muted">
+<code>observeQuery</code> は常時 WebSocket 接続を張る。家族利用で「同時刻に別々の端末で編集し続ける」状況は実際には起きないため、その鮮度要求に対して割に合わない。必要になった時点で移行でき、<strong>その際スキーマの変更は要らない</strong>。（§3.5）
+</p>
+
+<h2>サーバーサイドでデータを取らない</h2>
+
+<p>
+App Router を使っていながら、レシピの取得にサーバーコンポーネントを使っていない。これは検討した上での結論で、設計書 §3.4 に記録がある。
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>理由</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>効果が小さい</td><td>全件をクライアントに載せて絞り込む方針（§1.5）なので、サーバーで取っても同じ量が同じ経路でブラウザへ渡る。消えるのは初回のスピナーだけ</td></tr>
+<tr><td>実装が二重化する</td><td><code>AmplifyRepository</code> はブラウザのグローバルセッション前提。サーバー版はリクエスト文脈から client と <code>teamId</code> を注入する別実装になり、契約テストの軸も増える</td></tr>
+<tr><td>恩恵が1画面だけ</td><td><code>/recipes</code> の初回描画のみ。<code>/recipes/new</code>・<code>/recipes/[id]</code>・<code>/labels</code> はクライアント取得のまま残る</td></tr>
+<tr><td>ゲストは原理的に不可</td><td>データが localStorage にあるためサーバーレンダリングできない。初期描画の経路が恒久的に2本になる</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="label">それでも残しているもの</span>
+  <code>ssr: true</code>（Cookie へのトークン保存）と <code>createServerRunner</code> は残してある。
+  用途はデータ取得ではなく <code>/team</code> を守る middleware。サーバーは localStorage を読めないため、
+  既定設定のままでは middleware が常に「未認証」と判定してしまう。
+</div>
+
+<p>
+将来レシピが増えて初回ロードが重くなった場合の答えは、SSR ではなく <strong>検索インデックス（OpenSearch 等）の追加</strong>である。その時もスキーマは変えずに済む。
+</p>
+
+<h2>画面一覧とアクセス可否</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>URL</th><th>ゲスト</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><code>/</code></td><td><span class="pill ok">○</span></td><td>ランディング。「ゲストとして利用」「サインイン / 新規登録」</td></tr>
+<tr><td><code>/recipes</code></td><td><span class="pill ok">○</span></td><td>一覧＋検索・絞り込み。既定は更新日時の新しい順</td></tr>
+<tr><td><code>/recipes/new</code></td><td><span class="pill ok">○</span></td><td>新規作成（ゲストは3件で入口を塞ぐ）</td></tr>
+<tr><td><code>/recipes/[id]</code></td><td><span class="pill ok">○</span></td><td>詳細（x人前スケーリング）・編集・削除</td></tr>
+<tr><td><code>/labels</code></td><td><span class="pill ok">○</span></td><td>ラベル管理（ゲストは3件）</td></tr>
+<tr><td><code>/settings</code></td><td><span class="pill">一部</span></td><td><strong>テーマ設定のみゲストも利用可。</strong>表示名・パスワード変更は認証時だけ表示</td></tr>
+<tr><td><code>/team</code></td><td><span class="pill no">×</span></td><td>チーム名変更・招待コード発行・メンバー一覧・参加・離脱</td></tr>
+<tr><td><code>/auth/sign-in</code></td><td><span class="pill ok">○</span></td><td>サインイン</td></tr>
+<tr><td><code>/auth/sign-up</code></td><td><span class="pill ok">○</span></td><td>新規登録（メール確認コード入力を含む）</td></tr>
+<tr><td><code>/auth/reset-password</code></td><td><span class="pill ok">○</span></td><td>パスワードリセット</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>
+<strong>middleware で保護しているのは <code>/team</code> だけ</strong>（<code>src/middleware.ts</code> の <code>matcher</code>）。
+他はすべてゲストで機能するため、middleware を広く掛けるとゲストの導線を塞いでしまう。
+<code>/settings</code> はページ内で認証セクションを出し分けるだけでよく、対象外にしてある。
+テーマ設定が localStorage 駆動でゲストでも完全に動くため、ここを閉じるとゲストがダークテーマを選べず不自然になる。
+</p>
+
+<h2>Lambda を呼ぶ操作</h2>
+
+<p>
+クライアントから直接 DynamoDB を触れない操作は、AppSync のカスタムミューテーション経由で Lambda が行う。窓口は <code>src/lib/team/api.ts</code>。
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>操作</th><th>なぜ Lambda が必要か</th></tr></thead>
+<tbody>
+<tr><td><code>joinTeam</code></td><td>招待コードを入力する人は<strong>まだそのチームのメンバーではない</strong>。クライアントから <code>Team</code> を読んで照合することが原理的にできない（読めるなら誰でも全チームのコードを列挙できる）</td></tr>
+<tr><td><code>leaveTeam</code></td><td>Cognito グループからの除外・新しい個人チームの作成が Admin API</td></tr>
+<tr><td><code>issueInviteCode</code></td><td>コードの生成と有効期限の付与をサーバーで確定させる</td></tr>
+<tr><td><code>repairAccount</code></td><td>グループの作成・所属変更・所属の列挙が Admin API</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="label">忘れやすい点</span>
+  <strong>参加と離脱の後は必ず <code>fetchAuthSession({ forceRefresh: true })</code> を呼ぶ。</strong>
+  所属の変更は発行済みトークンに載らないため、取り直すまで新しいチームのレシピが1件も読めない
+  （逆に、抜けたはずのチームのレシピが見え続ける）。
+</div>
+
+<h2>主要ファイルの役割</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>ファイル</th><th>役割</th></tr></thead>
+<tbody>
+<tr><td><code>amplify/data/resource.ts</code></td><td><strong>設計の中心。</strong>4モデルのスキーマと認可ルール、4つのカスタムミューテーション</td></tr>
+<tr><td><code>amplify/backend.ts</code></td><td>組み立てと CDK による上書き。パスワードポリシー、未認証 Identity の無効化、Cognito 操作の IAM ポリシー</td></tr>
+<tr><td><code>amplify/functions/team/handler.ts</code></td><td>4ミューテーションの振り分け。1つの Lambda で受ける</td></tr>
+<tr><td><code>amplify/auth/post-confirmation/</code></td><td>サインアップ確定時に個人チームを作る Cognito トリガー</td></tr>
+<tr><td><code>src/repositories/index.ts</code></td><td>ゲスト / 登録ユーザーの分岐点。<strong>ここ1箇所だけ</strong></td></tr>
+<tr><td><code>src/repositories/local-storage-repository.ts</code></td><td>ゲスト実装。<strong>トライアル上限の唯一の関門</strong></td></tr>
+<tr><td><code>src/repositories/amplify-repository.ts</code></td><td>登録ユーザー実装。DynamoDB 側の型と画面向けの型を吸収する唯一の境界</td></tr>
+<tr><td><code>src/lib/recipes/search.ts</code></td><td>絞り込みと正規化（NFKC・カタカナ→ひらがな・小文字化）。純粋関数</td></tr>
+<tr><td><code>src/lib/recipes/scaling.ts</code></td><td>x人前スケーリング。<code>quantity: null</code> はスケールしない</td></tr>
+<tr><td><code>src/lib/migration/migrate-guest-data.ts</code></td><td>ゲストデータの引き継ぎ。ラベル ID の付け替えと冪等性</td></tr>
+<tr><td><code>src/lib/team/api.ts</code></td><td>チーム操作の入口。トークン再取得もここが担保する</td></tr>
+<tr><td><code>src/lib/theme.ts</code> / <code>components/ThemeScript.tsx</code></td><td>テーマ。描画上の真実は常に localStorage</td></tr>
+<tr><td><code>src/middleware.ts</code></td><td><code>/team</code> のみ認証必須にする</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>ロジックの置き場所の原則</h2>
+
+<p>
+「どこに書くか」の判断は、この2つに集約されている。
+</p>
+
+<div class="split two">
+  <div class="tier">
+    <span class="tier-name">強制するものは Repository 層へ</span>
+    <span class="tier-body">トライアル上限の判定は <code>LocalStorageRepository</code> の中にある。
+    コンポーネントやフックだけに置くと、新しい作成経路（複製・インポート等）を足した人が
+    チェックを書き忘れる。Repository に置けばどの経路も必ず1点を通る。</span>
+  </div>
+  <div class="tier">
+    <span class="tier-name">判断のいらないものは純粋関数へ</span>
+    <span class="tier-body">検索・スケーリング・ラベル ID の付け替え・招待コード生成は
+    AWS もブラウザも要らない純粋関数に切り出してある。
+    結果として、壊れると痛い箇所がそのまま単体テストの対象になっている。</span>
+  </div>
+</div>
+
+<p class="small muted">
+なお <code>useTrialLimits()</code> は「残り何件か」を返すだけで、判定の責任を持たない。
+表示専用と強制を意図的に分けている。（§4.2）
+</p>
+
+</main>
+
+<footer class="site-footer">
+  <p>recipe-base — <a href="https://github.com/ktr11/recipe-base">GitHub リポジトリ</a> /
+  <a href="https://github.com/ktr11/recipe-base/blob/main/docs/design.md">設計書 design.md</a></p>
+</footer>
+
+</body>
+</html>

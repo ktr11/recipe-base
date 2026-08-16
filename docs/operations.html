@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開発と運用 | recipe-base 設計ガイド</title>
+<meta name="description" content="recipe-base のセットアップ、コマンド、検証手順、テスト方針と CI の実行モデル。">
+<link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <p class="site-title"><a href="./">recipe-base 設計ガイド<span class="sub">レシピ保存・家族共有アプリ / Next.js + AWS Amplify Gen 2</span></a></p>
+    <nav class="site-nav">
+      <a href="./">概要</a>
+      <a href="./architecture.html">構成と動き</a>
+      <a href="./data-model.html">データと認可</a>
+      <a href="./decisions.html">設計判断</a>
+      <a href="./operations.html" aria-current="page">開発と運用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>開発と運用</h1>
+<p class="lede">
+手元で動かす手順、何を変えたら何を検証するか、テストと CI の考え方。
+</p>
+
+<h2>セットアップ</h2>
+
+<p>前提：Node.js 20 以上、pnpm、AWS 認証情報が設定済み（<code>aws sts get-caller-identity</code> で確認できる）。</p>
+
+<pre><code>pnpm install</code></pre>
+
+<p>次にバックエンドを自分専用の AWS 環境にデプロイする。</p>
+
+<pre><code>pnpm exec ampx sandbox</code></pre>
+
+<div class="note warn">
+  <span class="label">このコマンドは実際に AWS リソースを作成する</span>
+  Cognito User Pool・AppSync API・DynamoDB テーブル・Lambda が実際に作られ、課金対象になる。
+  実行したまま常駐させると <code>amplify/</code> の変更を検知して自動で再デプロイする。
+  片付けは <code>pnpm exec ampx sandbox delete</code>。
+</div>
+
+<p>
+接続情報は <code>amplify_outputs.json</code> に出力される。このファイルは接続先が環境ごとに異なるため
+<strong>Git 管理外</strong>で、フロントエンドの起動に必要になる。
+つまり<strong>一度もサンドボックスをデプロイしていない環境では <code>pnpm dev</code> が動かない</strong>。
+</p>
+
+<p>別のターミナルで：</p>
+
+<pre><code>pnpm dev   # http://localhost:3000</code></pre>
+
+<h2>コマンド</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>コマンド</th><th>内容</th><th>AWS</th></tr></thead>
+<tbody>
+<tr><td><code>pnpm dev</code></td><td>開発サーバー</td><td>デプロイ済み環境が必要</td></tr>
+<tr><td><code>pnpm build</code></td><td>本番ビルド（<strong>TypeScript の型検査を含む</strong>）</td><td>不要</td></tr>
+<tr><td><code>pnpm lint</code></td><td>ESLint</td><td>不要</td></tr>
+<tr><td><code>pnpm test</code></td><td>単体テスト</td><td>不要</td></tr>
+<tr><td><code>pnpm test:integration</code></td><td>認可の統合テスト</td><td><strong>デプロイ済み sandbox が必要</strong></td></tr>
+<tr><td><code>pnpm exec tsc --noEmit -p amplify/tsconfig.json</code></td><td>バックエンドの型検査</td><td>一度もデプロイしていないと通らない</td></tr>
+<tr><td><code>pnpm exec ampx sandbox</code></td><td>バックエンドをデプロイ</td><td><strong>リソースを作成する</strong></td></tr>
+<tr><td><code>pnpm exec ampx sandbox delete</code></td><td>サンドボックスを削除</td><td>—</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+  <span class="label">パッケージマネージャーは pnpm 固定</span>
+  <code>package.json</code> の <code>packageManager</code> で固定してある。npm / yarn のコマンドは使わない。
+  ネイティブバイナリを持つ依存を追加した場合は <code>pnpm.onlyBuiltDependencies</code> への追加が必要になることがある。
+</div>
+
+<h2>何を変えたら何を検証するか</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>変更した箇所</th><th>実行するもの</th></tr></thead>
+<tbody>
+<tr>
+  <td>フロントエンド（<code>src/</code>）</td>
+  <td><code>pnpm build</code>（型検査を含む）</td>
+</tr>
+<tr>
+  <td>バックエンド（<code>amplify/</code>）</td>
+  <td><code>pnpm exec tsc --noEmit -p amplify/tsconfig.json</code> <strong>と</strong> <code>pnpm build</code></td>
+</tr>
+<tr>
+  <td>認可ルール・スキーマ</td>
+  <td>上記に加えて <code>pnpm test:integration</code>、および PR に <code>backend-ci</code> ラベル</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="label">見落としやすい依存関係</span>
+  <strong>バックエンドを変更した場合も <code>pnpm build</code> を通すこと。</strong>
+  <code>amplify/</code> はルートの tsconfig から除外してあるが、<code>src/</code> が
+  <code>amplify/data/resource</code> の型を参照している。スキーマの変更はフロントエンドのビルドを壊し得る。
+</div>
+
+<p class="small muted">
+なお <code>$amplify/env/*</code> の型はデプロイ時にのみ生成されるため、
+一度も <code>ampx sandbox</code> を実行していない環境ではバックエンドの型検査が通らない。
+</p>
+
+<h2>テストの方針</h2>
+
+<p>
+テストは2種類に分け、<strong>目的も実行環境も分離してある</strong>。
+混ぜると、AWS への接続が必要なテストのせいで単体テストが遅くなり、誰も実行しなくなる。
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>種別</th><th>コマンド</th><th>対象</th><th>実行環境</th></tr></thead>
+<tbody>
+<tr><td>単体テスト</td><td><code>pnpm test</code></td><td>純粋なロジック</td><td>ローカル完結。AWS 不要</td></tr>
+<tr><td>統合テスト</td><td><code>pnpm test:integration</code></td><td>認可ルール</td><td>デプロイ済み sandbox に対して実行</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>契約テスト — このプロジェクト特有の形</h3>
+
+<p>
+<code>LocalStorageRepository</code> と <code>AmplifyRepository</code> は
+<strong>同じインターフェースを実装し、同じ振る舞いをしなければならない</strong>。
+そのためテストは片方ずつではなく、両実装が満たすべき<strong>契約</strong>として書かれている。
+</p>
+
+<pre><code>describe.each([
+  ['LocalStorageRepository', () =&gt; new LocalStorageRepository()],
+  ['AmplifyRepository',      () =&gt; new AmplifyRepository()],
+])('%s', (_name, create) =&gt; { /* 共通の契約 */ })</code></pre>
+
+<p class="small muted">
+実体は <code>tests/unit/support/recipe-repository-contract.ts</code>。
+先に契約を書いたから自然にこの形になった。動いているコードに後からテストを書く順序では、
+実装がテストしやすい形に寄る力が働かず、この構造は現れない。
+</p>
+
+<h3>単体テストの対象</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>対象</th><th>要点</th></tr></thead>
+<tbody>
+<tr><td>トライアル制限の判定</td><td>3/3/10 の境界。削除後に再作成できること（累計ではなく同時保有数）</td></tr>
+<tr><td>検索フィルタ・正規化</td><td>全角/半角・カタカナ/ひらがなの吸収。複数条件の AND</td></tr>
+<tr><td>x人前スケーリング</td><td><strong><code>quantity: null</code> をスケールしない</strong>分岐、小数の丸め</td></tr>
+<tr><td>ラベル ID の付け替え</td><td>移行時にラベルが外れないこと。印による冪等性</td></tr>
+<tr><td>招待コードの生成</td><td>除外文字（<code>0 O 1 I L</code>）が出現しないこと</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+この一覧は、設計書が「壊れやすい」と名指しした箇所とほぼ一致している。それは偶然ではない。
+</p>
+
+<h3>認可の統合テスト — 最も価値が高いテスト</h3>
+
+<p>
+<code>groupDefinedIn</code> による認可が誤っていた場合の帰結は「<strong>他人の家族のレシピが見える</strong>」であり、影響が最も重い。
+そしてこれは<strong>モックでは何も証明できない</strong> — 実際にデプロイされた AppSync にリクエストを投げるしかない。
+</p>
+
+<p>検証するシナリオの主眼は「<strong>できないこと</strong>」の確認にある。</p>
+
+<ul>
+  <li>チーム A のユーザーが、チーム B のレシピを <code>list</code> で取得<strong>できない</strong></li>
+  <li>チーム A のユーザーが、チーム B のレシピを ID 直指定で <code>get</code> <strong>できない</strong><br>
+    <span class="small muted">一覧に出ないことと、取得できないことは別の保証である</span></li>
+  <li>チーム A のユーザーが、チーム B のレシピを更新・削除<strong>できない</strong></li>
+  <li>同一チームの別ユーザーが、互いのレシピを編集<strong>できる</strong></li>
+  <li>チームに所属しないユーザーが、<code>Team</code> を読んで招待コードを列挙<strong>できない</strong></li>
+  <li>有効期限切れの招待コードで <code>joinTeam</code> が<strong>失敗する</strong></li>
+</ul>
+
+<h2>CI の実行モデル</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>ワークフロー</th><th>実行条件</th><th>内容</th><th>AWS</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>ci.yml</code></td>
+  <td>すべての PR と main への push</td>
+  <td>lint / <code>pnpm build</code>（型検査含む）/ 単体テスト</td>
+  <td>不要</td>
+</tr>
+<tr>
+  <td><code>backend.yml</code></td>
+  <td>PR は <code>backend-ci</code> ラベルが付いた時だけ／main への push は必ず／手動実行も可</td>
+  <td>バックエンドの型検査 + 認可の統合テスト</td>
+  <td><strong>必要</strong></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<p>サンドボックスの扱いには、守るべき不変条件がある。</p>
+
+<div class="note">
+  <strong>「常設 <code>ci</code> サンドボックスは常に main のスキーマを反映する」</strong>
+</div>
+
+<ul>
+  <li>既定では<strong>常設の <code>ci</code> サンドボックスを使い回す</strong>。スキーマ差分が無ければ <code>ampx sandbox --once</code> は実質 no-op で、フルデプロイ（5〜7分）を丸ごと省ける</li>
+  <li><strong>スキーマ（<code>amplify/**</code>）を変更した PR の時だけ</strong>、隔離した使い捨て <code>pr-&lt;番号&gt;</code> をデプロイし、末尾で破棄する。<code>ci</code>（＝main 状態）を汚さないため、未マージの PR が何本あっても常設サンドボックスは main のスキーマのまま保たれる</li>
+  <li>main への push が毎マージで <code>ci</code> を最新スキーマへ収束させ、この不変条件を維持する</li>
+</ul>
+
+<p>
+したがって<strong>認可やスキーマを触った PR は <code>backend-ci</code> ラベルを付けて統合テストを通してからマージする</strong>。
+手元で <code>pnpm test:integration</code> を通してから push できればなお良い。
+</p>
+
+<h2>コミットの粒度</h2>
+
+<p>
+<strong>意味のある単位ごとにコミットし、混ぜない。</strong>とりわけ
+<strong>ツールが生成した雛形は未修正のままコミットする</strong>という規約がある。
+</p>
+
+<pre><code>create-next-app を実行                → commit
+npm create amplify を実行             → commit
+auth/resource.ts を設計に合わせて修正 → commit</code></pre>
+
+<p>
+こうすると次のコミットの差分が「自分たちの設計判断」だけになり、
+レビューで生成物と判断が混ざらない。コミットメッセージは日本語。
+</p>
+
+<div class="note warn">
+  <span class="label">設計を変えるときの必須手順</span>
+  コードだけでなく <code>docs/design.md</code> も併せて更新する。
+  設計書とコードが食い違った時点で、この資料群の価値は失われる。
+</div>
+
+<h2>この解説サイトの公開について</h2>
+
+<p>
+このサイトは <code>docs/</code> 配下の静的 HTML で、GitHub Pages が
+<strong>main ブランチの <code>/docs</code> フォルダ</strong>を直接配信している。
+ビルドステップは無い。HTML を編集して main に入れれば、数十秒後に反映される。
+</p>
+
+<ul>
+  <li>ページを追加したら、各ページのナビゲーション（<code>nav.site-nav</code>）にもリンクを足す</li>
+  <li>スタイルは <code>docs/assets/site.css</code> の1枚だけ。外部 CDN・外部フォントには依存していない</li>
+  <li><code>docs/.nojekyll</code> は Jekyll による処理を止めるための空ファイル。消さないこと</li>
+</ul>
+
+</main>
+
+<footer class="site-footer">
+  <p>recipe-base — <a href="https://github.com/ktr11/recipe-base">GitHub リポジトリ</a> /
+  <a href="https://github.com/ktr11/recipe-base/blob/main/docs/design.md">設計書 design.md</a></p>
+</footer>
+
+</body>
+</html>
