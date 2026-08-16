@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>概要 | recipe-base 設計ガイド</title>
+<meta name="description" content="レシピ保存・家族共有アプリ recipe-base の全体像、技術スタック、設計思想のまとめ。">
+<link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <p class="site-title"><a href="./">recipe-base 設計ガイド<span class="sub">レシピ保存・家族共有アプリ / Next.js + AWS Amplify Gen 2</span></a></p>
+    <nav class="site-nav">
+      <a href="./" aria-current="page">概要</a>
+      <a href="./architecture.html">構成と動き</a>
+      <a href="./data-model.html">データと認可</a>
+      <a href="./decisions.html">設計判断</a>
+      <a href="./operations.html">開発と運用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>このアプリは何で、どう出来ているか</h1>
+<p class="lede">
+レシピを保存して家族で共有する Web アプリ。ログイン不要の「ゲスト」でも試せて、
+登録するとチーム単位でレシピを共有できる。この資料は、実装済みのコードが
+<strong>実際にどうなっているか</strong>と、<strong>なぜそうなっているか</strong>を
+一通り追えるようにまとめたもの。
+</p>
+
+<div class="note">
+  <span class="label">この資料の位置づけ</span>
+  詳細な根拠はリポジトリ内の <code>docs/design.md</code>（設計書・約800行）にある。
+  このサイトはその要約と地図で、各所に <code>§</code> 付きで設計書の対応節を示している。
+  設計書が正、このサイトは読みやすさ優先の入口。
+</div>
+
+<h2>まず1つだけ覚えること</h2>
+
+<div class="note">
+  <p><strong>すべてのデータは <code>teamId</code> を持ち、認可は「その <code>teamId</code> と
+  同名の Cognito グループに所属しているか」の1問に還元される。</strong></p>
+  <p class="small muted" style="margin-bottom:0">
+  この規則がアプリ全体を貫いている。ここから外れる例外を作った時点で、この設計は壊れる。（§1.2）</p>
+</div>
+
+<p>
+この1本の規則を成立させるために、いくつもの「一見すると素直でない」選択がなされている。
+たとえば <strong>個人ユーザーも「メンバー1人のチーム」として扱う</strong>。
+個人モードとチームモードを分ければ認可ルールが2本になり、分岐した瞬間にこの設計は成立しなくなるため。
+</p>
+
+<h2>機能の全体像</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>機能</th><th>ゲスト</th><th>登録ユーザー</th></tr></thead>
+<tbody>
+<tr><td>レシピの登録・編集・削除</td><td><span class="pill">3件まで</span></td><td><span class="pill ok">無制限</span></td></tr>
+<tr><td>ラベルの作成・削除</td><td><span class="pill">3件まで</span></td><td><span class="pill ok">無制限</span></td></tr>
+<tr><td>1レシピの材料</td><td><span class="pill">10個まで</span></td><td><span class="pill ok">無制限</span></td></tr>
+<tr><td>料理名・材料名・ラベルでの絞り込み検索</td><td><span class="pill ok">○</span></td><td><span class="pill ok">○</span></td></tr>
+<tr><td>x人前スケーリング表示</td><td><span class="pill ok">○</span></td><td><span class="pill ok">○</span></td></tr>
+<tr><td>4色テーマの切り替え</td><td><span class="pill ok">○</span></td><td><span class="pill ok">○</span>（端末間で同期）</td></tr>
+<tr><td>チームへの参加・招待コード発行・離脱</td><td><span class="pill no">×</span></td><td><span class="pill ok">○</span></td></tr>
+<tr><td>データの保存先</td><td>端末の localStorage</td><td>DynamoDB</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>
+ゲストが登録すると、localStorage のデータはクラウドへ引き継がれる（§5.3）。
+「試してから登録する」までの体験が途切れないことを、この設計はかなり真面目に優先している。
+</p>
+
+<h2>技術スタック</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>層</th><th>採用技術</th><th>役割・選定理由</th></tr></thead>
+<tbody>
+<tr>
+  <td>フレームワーク</td>
+  <td>Next.js 16（App Router）<br>React 19 / TypeScript 5</td>
+  <td>実態は「Next.js の上に載った SPA」に近い。データ取得はほぼクライアント側で行い、サーバー機能は <code>/team</code> を守る middleware だけに使っている（§3.4）</td>
+</tr>
+<tr>
+  <td>スタイリング</td>
+  <td>Tailwind CSS v4 + daisyUI 5</td>
+  <td>v4 は <code>tailwind.config.js</code> を使わず、CSS 側（<code>@plugin "daisyui"</code>）で設定する。テーマは daisyUI 組み込みの4種をそのまま使い、独自テーマを定義しない（§6.1）</td>
+</tr>
+<tr>
+  <td>バックエンド定義</td>
+  <td>AWS Amplify Gen 2（CDK ベースの TypeScript IaC）</td>
+  <td>インフラはすべて <code>amplify/</code> 配下の TypeScript から生成する。CloudFormation の手書きや AWS コンソールでの手作業は行わない</td>
+</tr>
+<tr>
+  <td>認証</td>
+  <td>Amazon Cognito User Pool</td>
+  <td>メールアドレス＋パスワード。<strong>チーム＝Cognito グループ</strong>として表現する。カスタム属性は一切使わない（§6.2）</td>
+</tr>
+<tr>
+  <td>API</td>
+  <td>AWS AppSync（GraphQL）</td>
+  <td>Amplify Data がスキーマから自動生成する。認可も同じスキーマ定義に書く</td>
+</tr>
+<tr>
+  <td>データベース</td>
+  <td>Amazon DynamoDB</td>
+  <td>Amplify Data 経由。部分一致検索が苦手という制約が、クライアント側検索という判断に直結している（§1.5）</td>
+</tr>
+<tr>
+  <td>サーバー処理</td>
+  <td>AWS Lambda ×2</td>
+  <td>Cognito グループ操作は Admin API でしかできず、ブラウザから実行できないため（§2.2）</td>
+</tr>
+<tr>
+  <td>テスト</td>
+  <td>Vitest</td>
+  <td>単体テストと、実デプロイに対する認可の統合テストの2本立て（§10）</td>
+</tr>
+<tr>
+  <td>CI</td>
+  <td>GitHub Actions ×2</td>
+  <td>無料の CI は常時、AWS を使う高価な CI はラベル opt-in ＋ main への保険（§10.4）</td>
+</tr>
+<tr>
+  <td>パッケージ管理</td>
+  <td>pnpm（バージョン固定）</td>
+  <td><code>package.json</code> の <code>packageManager</code> で固定。npm / yarn は使わない</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h2>システム構成</h2>
+
+<div class="diagram">
+  <div class="tier">
+    <span class="tier-name">ブラウザ</span>
+    <span class="tier-body">React コンポーネント → <code>RecipeRepository</code>（抽象）<br>
+    テーマ適用・全文検索・x人前スケーリングはここで完結する</span>
+  </div>
+  <div class="arrow">▼ 認証状態で実装が切り替わる ▼</div>
+  <div class="split two">
+    <div class="tier">
+      <span class="tier-name">ゲスト</span>
+      <span class="tier-body"><code>LocalStorageRepository</code><br>
+      → 端末の localStorage<br>
+      <strong>AWS には一切送らない</strong></span>
+    </div>
+    <div class="tier">
+      <span class="tier-name">登録ユーザー</span>
+      <span class="tier-body"><code>AmplifyRepository</code><br>
+      → AppSync（GraphQL）<br>
+      → DynamoDB</span>
+    </div>
+  </div>
+  <div class="arrow">▼ AWS 側 ▼</div>
+  <div class="split three">
+    <div class="tier">
+      <span class="tier-name">Cognito</span>
+      <span class="tier-body">User Pool<br>グループ＝チーム</span>
+    </div>
+    <div class="tier">
+      <span class="tier-name">AppSync + DynamoDB</span>
+      <span class="tier-body">Team / Recipe<br>Label / UserProfile</span>
+    </div>
+    <div class="tier">
+      <span class="tier-name">Lambda ×2</span>
+      <span class="tier-body">postConfirmation<br>teamFunction</span>
+    </div>
+  </div>
+</div>
+
+<p>
+<strong>ゲストの線は AWS に届いていない。</strong>これは手抜きではなく、
+Amplify の <code>allow.guest()</code> がゲスト同士のデータを分離できないという制約への対応で、
+未認証 Identity 自体を <code>backend.ts</code> で無効化して経路ごと塞いである（§5.1）。
+</p>
+
+<h2>ディレクトリの地図</h2>
+
+<pre><code>amplify/                   バックエンド定義（IaC・すべて TypeScript）
+  auth/resource.ts           Cognito User Pool の設定
+  auth/post-confirmation/    サインアップ確定時に個人チームを作る Lambda
+  data/resource.ts           DynamoDB のスキーマ＋認可ルール（★設計の中心）
+  functions/team/            joinTeam / leaveTeam / issueInviteCode / repairAccount
+  shared/                    招待コード生成・個人チーム作成の共通処理
+  backend.ts                 組み立て。CDK で細部を上書きする場所
+
+src/
+  app/                     App Router（= URL とページの対応）
+    recipes/  labels/  team/  settings/  auth/
+  components/              画面部品（recipes / auth / team に分割）
+  hooks/                   useRecipes / useAuth / useTrialLimits / useGuestImport
+  repositories/            ★ 保存先の抽象化。ゲストと登録ユーザーの分岐点
+    recipe-repository.ts     インターフェース（＝契約）
+    local-storage-repository.ts / amplify-repository.ts
+  lib/
+    recipes/                 検索・スケーリング・型・トライアル上限（純粋関数）
+    migration/               ゲストデータの引き継ぎ
+    auth/  team/  amplify/   認証・チーム API・Amplify 設定
+  middleware.ts            /team だけを認証必須にする
+
+tests/
+  unit/                    AWS 不要。ロジックと契約テスト
+  integration/             デプロイ済み環境に対する認可テスト
+
+docs/
+  design.md                設計書（判断の根拠はすべてここ）
+  initial.md               当初の要件定義
+  *.html                   この解説サイト</code></pre>
+
+<h2>続きの読み方</h2>
+
+<div class="cards">
+  <a class="card" href="./architecture.html">
+    <span class="card-title">構成と動き →</span>
+    <span class="card-desc">画面を開いてから表示されるまでに何が起きるか。Repository による差し替え、画面一覧、データ取得の方針。</span>
+  </a>
+  <a class="card" href="./data-model.html">
+    <span class="card-title">データと認可 →</span>
+    <span class="card-desc">4つのモデルと認可ルール。サインアップ・チーム参加・離脱・自己修復のフロー。</span>
+  </a>
+  <a class="card" href="./decisions.html">
+    <span class="card-title">設計判断 →</span>
+    <span class="card-desc">「なぜ普通のやり方をしていないのか」を16項目。触る前に読むと事故が減る。</span>
+  </a>
+  <a class="card" href="./operations.html">
+    <span class="card-title">開発と運用 →</span>
+    <span class="card-desc">セットアップ、コマンド、何を変えたら何を検証するか、テストと CI の考え方。</span>
+  </a>
+</div>
+
+</main>
+
+<footer class="site-footer">
+  <p>recipe-base — <a href="https://github.com/ktr11/recipe-base">GitHub リポジトリ</a> /
+  <a href="https://github.com/ktr11/recipe-base/blob/main/docs/design.md">設計書 design.md</a></p>
+</footer>
+
+</body>
+</html>
