@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設計判断 | recipe-base 設計ガイド</title>
+<meta name="description" content="recipe-base が「普通のやり方」をしていない箇所と、その理由の一覧。">
+<link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <p class="site-title"><a href="./">recipe-base 設計ガイド<span class="sub">レシピ保存・家族共有アプリ / Next.js + AWS Amplify Gen 2</span></a></p>
+    <nav class="site-nav">
+      <a href="./">概要</a>
+      <a href="./architecture.html">構成と動き</a>
+      <a href="./data-model.html">データと認可</a>
+      <a href="./decisions.html" aria-current="page">設計判断</a>
+      <a href="./operations.html">開発と運用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>なぜこうなっているのか</h1>
+<p class="lede">
+このアプリには「一見すると間違いに見えるが、実は正しい」箇所がいくつもある。
+それらは AWS 側の制約や、実装中に実際にぶつかった問題への対応として選ばれたもの。
+コードに手を入れる前に読むと、善意で壊すことを避けられる。
+</p>
+
+<div class="note warn">
+  <span class="label">読み方</span>
+  各項目は「<strong>採った案 / 素直な案 / なぜ却下したか / 何を諦めたか</strong>」の形で書いてある。
+  「何を諦めたか」が空でない項目は、状況が変われば再検討の余地がある。
+</div>
+
+<h2>データの持ち方</h2>
+
+<div class="decision">
+  <h3>1. ゲストのデータを AWS に保存せず localStorage に置く</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd>Cognito の未認証 Identity（<code>allow.guest()</code>）で DynamoDB に保存する。当初の要件定義にもそう書かれていた</dd>
+    <dt>却下の理由</dt>
+    <dd>Amplify Data の <code>allow.guest()</code> は<strong>所有者単位の分離ができない</strong>。<code>owner</code> フィールドは User Pool のユーザーにしか紐づかず、Identity Pool の未認証 ID では機能しない。素直に実装すると<strong>世界中の全ゲストが互いのレシピを閲覧・編集・削除できる公開テーブル</strong>になり、「3件まで」のカウントも他人のデータを含んで破綻する。クライアント生成の <code>guestId</code> でフィルタする案はサーバー側で強制されず、DevTools から他人のデータが全部読める</dd>
+    <dt>実装</dt>
+    <dd><code>backend.ts</code> で <code>allowUnauthenticatedIdentities = false</code>。<strong>未認証 Identity 自体を発行せず経路ごと塞いである</strong></dd>
+    <dt>諦めたもの</dt>
+    <dd>ゲストのデータは端末を変えると引き継げない。ただしトライアルに求められる価値は「本登録前に触れること」であってクラウド永続化ではない。副次的な利点として、認可ルールが「認証ユーザーだけ」を考えればよくなり大幅に単純化した</dd>
+  </dl>
+  <span class="ref">design.md §5.1</span>
+</div>
+
+<div class="decision">
+  <h3>2. 材料を別テーブルにせず <code>Recipe</code> に埋め込む</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd><code>Ingredient</code> モデルを作り <code>Recipe</code> と 1対多で関連づける</dd>
+    <dt>却下の理由</dt>
+    <dd>
+      <ul style="margin:0.2rem 0 0">
+        <li>材料名の部分一致検索はどのみちクライアント側で行うので、別テーブルにして得られる検索上の利点がない</li>
+        <li>レシピ編集のたびに子レコードの差分計算が必要になり、しかも<strong>アトミックに保存できない</strong>。通信が切れると材料だけ半分更新された状態が残る</li>
+        <li>材料は<strong>並び順に意味がある</strong>。別モデルでは order フィールドの手動管理が要る</li>
+      </ul>
+      埋め込みなら、レシピの保存は常に<strong>1回の書き込み</strong>で完結する
+    </dd>
+    <dt>諦めたもの</dt>
+    <dd>材料単位での集計クエリ（「玉ねぎを使うレシピ数」等）はサーバー側でできない</dd>
+  </dl>
+  <span class="ref">design.md §1.4</span>
+</div>
+
+<div class="decision">
+  <h3>3. ラベルを中間テーブルにせず ID 配列で持つ</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd><code>RecipeLabel</code> 中間モデルを定義する（Amplify Gen 2 は <code>manyToMany</code> を廃止しているので自前定義になる）</dd>
+    <dt>却下の理由</dt>
+    <dd>一覧取得がネストクエリになり <strong>N+1</strong> を踏む。全件をクライアントに載せる方針と特に相性が悪い</dd>
+    <dt>諦めたもの</dt>
+    <dd><strong>参照整合性が保証されない。</strong>対策として、読み込み時に存在しない <code>labelId</code> を無視する処理を最終防衛線に置いてある</dd>
+  </dl>
+  <span class="ref">design.md §1.4 / §1.6</span>
+</div>
+
+<h2>検索と表示</h2>
+
+<div class="decision">
+  <h3>4. 検索をサーバーではなくクライアントで行う</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd>GraphQL のフィルタでサーバー側に絞り込ませる</dd>
+    <dt>却下の理由</dt>
+    <dd>要件の「材料名の<strong>部分一致</strong>検索」は、<strong>DynamoDB がサーバー側で効率的に実行できない操作</strong>。<code>contains</code> フィルタは存在するが実体は「全件読んでから捨てる」動作でインデックスが効かない。加えて日本語の表記ゆれも DynamoDB 側では吸収できない</dd>
+    <dt>採った案</dt>
+    <dd>チームのレシピ全件をクライアントに読み込み、メモリ上で絞り込む。<strong>キー入力ごとの通信がゼロ</strong>なので体感が即座。家族利用ではレシピは数十〜数百件で1クエリに収まる</dd>
+    <dt>諦めたもの</dt>
+    <dd>数千件規模になると初回ロードが重くなる。その時点で OpenSearch 等の検索インデックスを追加する移行になるが、<strong>スキーマは変更せずに済む</strong></dd>
+  </dl>
+  <span class="ref">design.md §1.5</span>
+</div>
+
+<div class="decision">
+  <h3>5. サーバーコンポーネントでデータを取得しない</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd>App Router なのだから <code>/recipes</code> の初期表示はサーバー側で取得し <code>initialRecipes</code> として渡す</dd>
+    <dt>却下の理由</dt>
+    <dd>この案は当初<strong>設計書に採用として書かれていたが、実装が進んだ段階で撤回した</strong>。消えるのは初回のスピナーだけで転送量は変わらず、そのために <code>AmplifyRepository</code> のサーバー版という第2実装を恒久的に保守することになる。ゲストの画面は原理的にサーバーレンダリングできない（データが localStorage にある）ので、初期描画の経路も2本になる</dd>
+    <dt>より根本的には</dt>
+    <dd>このアプリは<strong>実質「Next.js の上に載った SPA」</strong>であり、App Router のサーバー取得の恩恵をほとんど受けない。<code>/recipes</code> だけ SSR に戻すのは局所的な例外を作る動きになる</dd>
+    <dt>ただし残したもの</dt>
+    <dd><code>ssr: true</code>（Cookie へのトークン保存）と <code>createServerRunner</code>。用途は <code>/team</code> を守る middleware で、これが無いとサーバー側が常に「未認証」と判定してしまう</dd>
+  </dl>
+  <span class="ref">design.md §3.4</span>
+</div>
+
+<div class="decision">
+  <h3>6. リアルタイム同期（<code>observeQuery</code>）を使わない</h3>
+  <dl>
+    <dt>採った案</dt>
+    <dd>マウント時の取得＋タブフォーカス復帰時（<code>visibilitychange</code>）の再取得</dd>
+    <dt>却下の理由</dt>
+    <dd><code>observeQuery</code> は常時 WebSocket 接続を張る。家族利用で「同時刻に別々の端末で編集し続ける」状況は実際には発生せず、その鮮度要求に対して割に合わない</dd>
+    <dt>諦めたもの</dt>
+    <dd>他メンバーの変更が即座には反映されない。不足を感じた時点で移行でき、<strong>その際スキーマは変更不要</strong></dd>
+  </dl>
+  <span class="ref">design.md §3.5</span>
+</div>
+
+<h2>認証とチーム</h2>
+
+<div class="decision">
+  <h3>7. 全ユーザーが必ず1つのチームに属する（個人＝1人のチーム）</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd>「個人のレシピ」と「チームのレシピ」が併存し、UI でモードを切り替える</dd>
+    <dt>却下の理由</dt>
+    <dd>読み取り経路が2本になり、<strong>認可ルールが分岐する</strong>。所有者ベースの認可とグループ認可が混在した時点でこの設計は壊れる</dd>
+    <dt>効果</dt>
+    <dd>認可ルールが1本に統一され、UI から個人/チームの切り替えが消えた</dd>
+  </dl>
+  <span class="ref">design.md §0 / §1.2</span>
+</div>
+
+<div class="decision">
+  <h3>8. Cognito のグループ名を <code>teamId</code> の値そのものにする</h3>
+  <dl>
+    <dt>理由</dt>
+    <dd><code>allow.groupDefinedIn('teamId')</code> は「<code>teamId</code> フィールドの値と同名のグループに所属しているか」を見る。グループ名と <code>teamId</code> が一致していなければこのルールが成立しない</dd>
+    <dt>副作用</dt>
+    <dd><code>Team</code> モデルは <code>teamId</code> を主キーに宣言し、Amplify が自動採番する <code>id</code> を使わない。採番は Lambda の <code>crypto.randomUUID()</code>（順序性が不要なので ULID の依存を足す理由がない）</dd>
+  </dl>
+  <span class="ref">design.md §1.2</span>
+</div>
+
+<div class="decision">
+  <h3>9. チーム参加を Lambda で処理する（クライアントから照合しない）</h3>
+  <dl>
+    <dt>理由</dt>
+    <dd><strong>招待コードを入力する人は、まだそのチームのメンバーではない。</strong>したがってクライアントから <code>Team</code> レコードを読んでコードを照合することが<strong>原理的にできない</strong>（読めるなら誰でも全チームのコードを列挙できてしまう）。加えて Cognito グループの作成・所属変更は Admin API でクライアントからは実行できない</dd>
+    <dt>これは異常な構成ではない</dt>
+    <dd>Admin API の "Admin" は「人間の管理者が使う」ではなく「開発者側の信頼された資格情報が必要」の意味で、サーバー側から呼ぶことが設計上の想定用途。避けるべきは「ブラウザから Admin API を叩ける」構成であり、ここではクライアントは認証必須のミューテーションしか呼べない</dd>
+  </dl>
+  <span class="ref">design.md §2.1 / §2.2</span>
+</div>
+
+<div class="decision">
+  <h3>10. Cognito のカスタム属性を一切使わない</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd>テーマや所属チームを <code>custom:theme</code> のようなカスタム属性に持つ</dd>
+    <dt>却下の理由</dt>
+    <dd><strong>User Pool のスキーマは作成時に凍結される。</strong>カスタム属性を後から追加するにはプールの作り直し＝<strong>全ユーザー消滅</strong>が必要。「テーマ以外の設定が今後一切増えない」という賭けに負けたときの代償が大きすぎる</dd>
+    <dt>採った案</dt>
+    <dd>ユーザー単位の情報はすべて DynamoDB の <code>UserProfile</code> モデルで扱う</dd>
+  </dl>
+  <span class="ref">design.md §6.2</span>
+</div>
+
+<div class="decision">
+  <h3>11. 招待コードの有効期限を DynamoDB の TTL で判定しない</h3>
+  <dl>
+    <dt>却下の理由</dt>
+    <dd>TTL 削除は best-effort であり、期限到達から<strong>最大48時間</strong>削除が遅れる。TTL に頼ると期限切れコードが2日間有効なままになる</dd>
+    <dt>採った案</dt>
+    <dd>Lambda 側で <code>inviteCodeExpiresAt &gt; now</code> を明示的に比較する。TTL は掃除用途としてのみ併用可</dd>
+  </dl>
+  <span class="ref">design.md §2.3</span>
+</div>
+
+<div class="decision">
+  <h3>12. 招待コードに UUID を使わず、紛らわしい文字を除いた8桁にする</h3>
+  <dl>
+    <dt>理由</dt>
+    <dd>招待コードは<strong>口頭や手入力で家族に伝えられる</strong>必要がある。UUID はその用途に耐えない。<code>0 O 1 I L</code> を除外した文字セットを使い、<code>ABCD-2345</code> のように区切って表示する</dd>
+  </dl>
+  <span class="ref">design.md §2.3</span>
+</div>
+
+<div class="decision">
+  <h3>13. 離脱者はレシピを一切持ち出さない</h3>
+  <dl>
+    <dt>理由</dt>
+    <dd>「誰が作ったレシピか」を持たない設計なので、持ち出す範囲を定義できない。チームに残す方が家族の運用実態に合う</dd>
+    <dt>必須の緩和策</dt>
+    <dd>離脱ボタンには「<strong>レシピはチームに残り、あなたの手元には残りません</strong>」と明示する確認モーダルを置く。これが無いと誤操作でレシピを失う事故が起きる</dd>
+  </dl>
+  <span class="ref">design.md §2.6</span>
+</div>
+
+<h2>実装中に判明して形が変わったもの</h2>
+
+<div class="decision">
+  <h3>14. Cognito 操作の IAM ポリシーを専用スタックに切り出す</h3>
+  <dl>
+    <dt>何が起きたか</dt>
+    <dd><code>postConfirmation</code> の実行ロールに User Pool の ARN を参照するポリシーを直接付けたところ、
+    <code>UserPool → trigger → Lambda → 実行ロール → ポリシー → UserPool</code> という循環が auth スタック内に閉じ、
+    CloudFormation がデプロイを拒否した（実際に <code>CloudformationResourceCircularDependencyError</code> で失敗）</dd>
+    <dt>対応</dt>
+    <dd><code>backend.createStack('CognitoGroupAccess')</code> でポリシー専用スタックを作り、そこから両 Lambda の実行ロールにアタッチする。auth スタックはポリシースタックを一切参照しないので輪が閉じない</dd>
+    <dt>この分離が効く理由</dt>
+    <dd>権限範囲を広げる妥協（<code>cognito-idp:*</code> や <code>Resource: "*"</code>）をせずに済む。付与しているのは 5 つのアクションだけで、対象 User Pool の ARN に限定してある</dd>
+  </dl>
+  <span class="ref">design.md §2.2 / amplify/backend.ts</span>
+</div>
+
+<div class="decision">
+  <h3>15. <code>postConfirmation</code> に <code>resourceGroupName: 'auth'</code> を指定する</h3>
+  <dl>
+    <dt>理由</dt>
+    <dd>この関数は auth のトリガーでありながら data へのアクセスを必要とする。既定のスタック配置のままだと
+    <code>auth → function → data → auth</code> の循環参照になりデプロイできない。auth スタックに同居させることで解消する</dd>
+  </dl>
+  <span class="ref">design.md §2.2</span>
+</div>
+
+<div class="decision">
+  <h3>16. Lambda で <code>event.info.fieldName</code> を読まない</h3>
+  <dl>
+    <dt>何が起きたか</dt>
+    <dd><code>aws-lambda</code> の <code>AppSyncResolverEvent</code> 型は <code>info.fieldName</code> を持つが、
+    <strong>Amplify が生成する直接 Lambda リゾルバは payload の直下に <code>fieldName</code> を置き、<code>info</code> を渡さない。</strong>
+    型を信じて書いた結果、全ミューテーションが「Cannot read properties of undefined」で落ちた</dd>
+    <dt>対応</dt>
+    <dd><code>payload.fieldName ?? payload.info?.fieldName</code> の順で読み、どちらも無ければ payload のキー一覧を添えて例外を投げる。
+    次に形が変わったとき、統合テストの1往復（sandbox デプロイを含む）を無駄にしないため</dd>
+  </dl>
+  <span class="ref">amplify/functions/team/handler.ts</span>
+</div>
+
+<div class="decision">
+  <h3>17. <code>joinTeam</code> のデータ移送を「旧チームが1人だった場合」に限る</h3>
+  <dl>
+    <dt>当初の想定</dt>
+    <dd>「参加する人の旧チームは必ず1人チーム」という前提で、旧チームのレシピを全件新チームへ移す設計だった</dd>
+    <dt>実装時に判明したこと</dt>
+    <dd><strong>家族チームに属するメンバーが別のチームへ移る経路が実際にある。</strong>その場合に全件移すと、旧チームに残るメンバーからレシピを奪うことになる</dd>
+    <dt>対応</dt>
+    <dd>移送は旧チームが1人だった場合に限る。持ち出さない扱いは離脱（項目13）と共通の方針</dd>
+  </dl>
+  <span class="ref">design.md §2.5</span>
+</div>
+
+<div class="decision">
+  <h3>18. <code>UserProfile.teamId</code> にフィールドレベル認可を足す</h3>
+  <dl>
+    <dt>当初の弱点</dt>
+    <dd>モデル全体の owner 認可が <code>update</code> を許すため、本人が <code>teamId</code> を任意の値に書き換えられた。
+    対応する Cognito グループを持たないのでレシピは読めないが、<strong>他チームのメンバー一覧に自分が現れる</strong></dd>
+    <dt>対応</dt>
+    <dd><code>teamId</code> だけ読み取り専用にし、書き込みを Lambda（IAM）に限定した。所属の変更は <code>joinTeam</code> / <code>leaveTeam</code> の責務であり、クライアントには読めれば足りる</dd>
+  </dl>
+  <span class="ref">design.md §1.7</span>
+</div>
+
+<h2>作り方に関する判断</h2>
+
+<div class="decision">
+  <h3>19. トライアル上限の強制を Repository 層に置く</h3>
+  <dl>
+    <dt>却下した置き場所</dt>
+    <dd>コンポーネントやフックでの判定</dd>
+    <dt>理由</dt>
+    <dd><strong>新しい作成経路（複製機能・インポート等）を追加した人がチェックを書き忘れる</strong>のが典型的な壊れ方。
+    Repository 層に置けば、どの経路から作成しても必ずこの1点を通る</dd>
+    <dt>役割分担</dt>
+    <dd>強制は <code>LocalStorageRepository</code>、表示（「残り2件」等）は <code>useTrialLimits()</code>。
+    後者は判定の責任を持たない。<code>AmplifyRepository</code> は制限を一切持たない</dd>
+  </dl>
+  <span class="ref">design.md §4.2</span>
+</div>
+
+<div class="decision">
+  <h3>20. ゲストと登録ユーザーで同じ画面・同じルートを使う</h3>
+  <dl>
+    <dt>素直な案</dt>
+    <dd><code>/trial/recipes</code> のようなゲスト専用ルートを設ける</dd>
+    <dt>却下の理由</dt>
+    <dd><strong>レシピ UI 一式を2系統保守する</strong>ことになり、片方だけ修正して挙動がズレる事故が確実に起きる</dd>
+    <dt>採った案</dt>
+    <dd>同一ルートを共有し、データ層（<code>RecipeRepository</code>）だけを差し替える</dd>
+  </dl>
+  <span class="ref">design.md §3.3</span>
+</div>
+
+<div class="decision">
+  <h3>21. テーマの「真実」を localStorage に置く</h3>
+  <dl>
+    <dt>問題</dt>
+    <dd>サーバーに保存したテーマは<strong>初回描画に間に合わない</strong>。Next.js が HTML を返す時点でユーザーのテーマは不明なので、
+    素直に実装すると「既定テーマで一瞬描画 → 取得後に切り替わる」フラッシュが必ず起きる。ダークテーマ利用者には真っ白な画面が一瞬光る</dd>
+    <dt>唯一の対策</dt>
+    <dd><code>&lt;head&gt;</code> 内の<strong>ブロッキングなインラインスクリプト</strong>で localStorage を読み、描画前に <code>&lt;html data-theme&gt;</code> を書く。
+    <code>&lt;html suppressHydrationWarning&gt;</code> とセットで機能する</dd>
+    <dt>サーバー保存の位置づけ</dt>
+    <dd><code>UserProfile.theme</code> は「別端末への同期用の控え」。読み込みで1クエリ増えるが、描画は既に完了しているので体感コストはゼロ</dd>
+  </dl>
+  <span class="ref">design.md §6.2</span>
+</div>
+
+<div class="decision">
+  <h3>22. 数値にならない分量（「適量」「少々」）を許容する</h3>
+  <dl>
+    <dt>理由</dt>
+    <dd>日本のレシピでは <code>適量</code> <code>少々</code> <code>ひとつまみ</code> が頻出し、数値化もスケーリングもできない</dd>
+    <dt>設計</dt>
+    <dd><code>quantity</code> を <strong>null 可</strong>とし、null の材料はスケーリング対象外としてそのまま表示する。
+    単位は候補付きの自由入力（完全な固定ドロップダウンにすると <code>パック</code> <code>缶</code> <code>房</code> などの裾野が広すぎて必ず不足する）</dd>
+    <dt>やらないこと</dt>
+    <dd>分数変換（<code>大さじ1/2</code> 等）は v1 では実装しない。単位ごとの丸め規則が必要になり複雑さが跳ね上がるため、料理する人の判断に委ねる。表示は小数第1位で四捨五入し末尾の 0 を落とす</dd>
+  </dl>
+  <span class="ref">design.md §6.4</span>
+</div>
+
+<div class="decision">
+  <h3>23. バックエンド CI を既定では PR で走らせない</h3>
+  <dl>
+    <dt>問題</dt>
+    <dd>認可の統合テストは<strong>デプロイ済みの実バックエンドを相手にする</strong>。価値は高いが、CI で毎回サンドボックスをフルデプロイ（5〜7分）すると AWS 料金と CI 時間が積み上がる</dd>
+    <dt>採った案</dt>
+    <dd>PR では <code>backend-ci</code> ラベルを付けた時だけ実行し、<strong>main への push では保険として必ず実行する</strong>。
+    常設の <code>ci</code> サンドボックスを使い回し、スキーマを変えた PR の時だけ使い捨ての <code>pr-&lt;番号&gt;</code> をデプロイして破棄する</dd>
+    <dt>ラベル opt-in だけにしない理由</dt>
+    <dd>付け忘れで検証が抜ける。認可テストは本プロジェクトで最も重い失敗（<strong>他人の家族のレシピが見える</strong>）を守るテストであり、opt-in の裏に隠してはならない</dd>
+  </dl>
+  <span class="ref">design.md §10.4</span>
+</div>
+
+<h2>意図的に作っていないもの（v1 スコープ外）</h2>
+
+<p>以下は忘れているのではなく、除外すると決めたもの。聞かれない限り実装も提案もしない。</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>項目</th><th>見送りの理由</th></tr></thead>
+<tbody>
+<tr>
+  <td>レシピ画像</td>
+  <td>S3 の追加とチーム単位のパス認可の設計が増える。加えて<strong>localStorage（上限 約5MB）と致命的に相性が悪く</strong>、Base64 で持つと写真2〜3枚で枯渇する。ゲストに画像を許すと S3 への未認証書き込みが必要になり、項目1で回避した問題が再燃する。<code>Recipe.imageKey</code> フィールドだけ予約してある</td>
+</tr>
+<tr><td>チーム内のロール（管理者/一般）とメンバーの追放</td><td>家族単位の利用で権限差を設ける必要がない</td></tr>
+<tr><td>複数チームへの同時所属</td><td>「1ユーザー＝1チーム」が認可ルールを1本に保つ前提になっている</td></tr>
+<tr><td>リアルタイム同期</td><td>項目6</td></tr>
+<tr><td>i18n</td><td>UI は日本語のみ</td></tr>
+<tr><td>ソフトデリート / ゴミ箱</td><td>削除は確認モーダル＋物理削除</td></tr>
+<tr><td>E2E テスト（Playwright）</td><td>価値があるのは「ゲストで作成 → 登録 → 引き継ぎ」の1本だけだが、CI で Cognito のメール確認コードを受け取る仕組みが必要になり投資に見合わない</td></tr>
+<tr><td>UI のスナップショットテスト</td><td>見た目を変えるたびに更新するだけの作業になり、バグを検出しない</td></tr>
+</tbody>
+</table>
+</div>
+
+</main>
+
+<footer class="site-footer">
+  <p>recipe-base — <a href="https://github.com/ktr11/recipe-base">GitHub リポジトリ</a> /
+  <a href="https://github.com/ktr11/recipe-base/blob/main/docs/design.md">設計書 design.md</a></p>
+</footer>
+
+</body>
+</html>
