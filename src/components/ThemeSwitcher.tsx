@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { useAuth } from '@/hooks/use-auth';
 import {
   applyTheme,
   getServerThemeSnapshot,
@@ -9,9 +10,10 @@ import {
   THEMES,
   type ThemeId,
 } from '@/lib/theme';
+import { saveTheme } from '@/lib/user/profile';
 
 /**
- * テーマ切り替え（docs/design.md §6.1）
+ * テーマ切り替え（docs/design.md §6.1 / §6.2）
  *
  * 現在の選択状態はサーバーでは分からない（localStorage にあるため）ので、
  * マウント後に読み取る。それまでは未選択として描画する。
@@ -21,6 +23,8 @@ import {
  * 印だけ。
  */
 export default function ThemeSwitcher() {
+  const { guest } = useAuth();
+
   const current = useSyncExternalStore(
     subscribeTheme,
     getThemeSnapshot,
@@ -30,8 +34,17 @@ export default function ThemeSwitcher() {
   const handleSelect = (theme: ThemeId) => {
     // applyTheme が購読者に通知するため、ここで状態を持つ必要はない
     applyTheme(theme);
-    // TODO: 認証済みの場合は UserProfile.theme にも保存する（別端末との同期）。
-    // 設定画面とデータ層が揃うステップ以降で対応する。
+
+    // 認証済みなら別端末用の控えも残す（§6.2）。ゲストは AWS に一切
+    // 書き込まないため何もしない（§5.1）
+    if (guest) return;
+
+    // ⚠️ 待たないのは意図的。表示は applyTheme で既に切り替わっており、
+    // 控えの保存が遅れても利用者に見えるものは何も変わらない。
+    // 失敗しても操作を止めず、ログだけ残す
+    void saveTheme(theme).catch((caught: unknown) => {
+      console.error(caught);
+    });
   };
 
   return (
