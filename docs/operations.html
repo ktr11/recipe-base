@@ -202,7 +202,7 @@
 </tr>
 <tr>
   <td><code>backend.yml</code></td>
-  <td>PR は <code>backend-ci</code> ラベルが付いた時だけ／main への push は必ず／手動実行も可</td>
+  <td>PR は <code>backend-ci</code> ラベルが付いた時だけ／main への push はバックエンド関連のパスが変わった時／手動実行も可</td>
   <td>バックエンドの型検査 + 認可の統合テスト</td>
   <td><strong>必要</strong></td>
 </tr>
@@ -219,8 +219,19 @@
 <ul>
   <li>既定では<strong>常設の <code>ci</code> サンドボックスを使い回す</strong>。スキーマ差分が無ければ <code>ampx sandbox --once</code> は実質 no-op で、フルデプロイ（5〜7分）を丸ごと省ける</li>
   <li><strong>スキーマ（<code>amplify/**</code>）を変更した PR の時だけ</strong>、隔離した使い捨て <code>pr-&lt;番号&gt;</code> をデプロイし、末尾で破棄する。<code>ci</code>（＝main 状態）を汚さないため、未マージの PR が何本あっても常設サンドボックスは main のスキーマのまま保たれる</li>
-  <li>main への push が毎マージで <code>ci</code> を最新スキーマへ収束させ、この不変条件を維持する</li>
+  <li>main への push が <code>ci</code> を最新スキーマへ収束させ、この不変条件を維持する。<strong>スキーマを変えたマージでは必ず走り</strong>（<code>amplify/**</code> が変わるため）、スキーマを変えないマージでは <code>ci</code> が既に main と一致しているので走らせる必要がない</li>
 </ul>
+
+<div class="note warn">
+  <span class="label">main backstop の起動条件</span>
+  <p><code>backend.yml</code> の push トリガーは <code>amplify/**</code> / <code>tests/integration/**</code> /
+  <code>.github/workflows/backend.yml</code> / <code>package.json</code> / <code>pnpm-lock.yaml</code> に絞ってある。
+  ドキュメントや <code>src/</code> だけのマージでは走らない。</p>
+  <p style="margin-bottom:0"><strong>絞っても保証は落ちない。</strong>
+  認可ルールもスキーマも <code>amplify/data/resource.ts</code> にあり、それらを壊す変更は必ず
+  <code>amplify/**</code> を通る。守るべきは「認可を壊し得る変更が main に入ったら必ず検証される」ことであって、
+  「マージのたびに走る」ことではない。</p>
+</div>
 
 <p>
 したがって<strong>認可やスキーマを触った PR は <code>backend-ci</code> ラベルを付けて統合テストを通してからマージする</strong>。

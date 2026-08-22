@@ -65,7 +65,10 @@ auth/resource.ts を設計に合わせて修正 → commit
   既定では PR で走らない**（詳細は `docs/design.md §10.4`）。挙動:
   - PR では **`backend-ci` ラベルを付けた時だけ**実行する。付けなければ走るのは
     無料の `ci.yml`（lint / build / 単体テスト）のみ
-  - **main への push では保険として必ず**実行する
+  - main への push では、**バックエンド関連のパスが変わった時に必ず**実行する（保険）。
+    対象は `amplify/**`・`tests/integration/**`・`backend.yml`・`package.json`・
+    `pnpm-lock.yaml`。`src/` やドキュメントだけの変更では走らない。認可を壊す変更は
+    必ず `amplify/**` を通るため、絞っても保証は落ちない
   - 常設の `ci` サンドボックスを使い回すため、スキーマ未変更なら再デプロイ無しで
     短時間。スキーマ（`amplify/**` 等）を変更した PR の時だけ使い捨ての
     `pr-<番号>` をフルデプロイして破棄する
