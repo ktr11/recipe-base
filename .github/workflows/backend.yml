@@ -10,7 +10,11 @@ name: Backend
 #
 # コスト対策（docs/design.md §10.4）:
 #   - PR では backend-ci ラベルが付いた時だけ実行する（既定は無料の ci.yml のみ）
-#   - main への push では保険として必ず実行する
+#   - main への push では、下の paths に該当する変更があった時に必ず実行する。
+#     ラベルの付け忘れで壊れた認可が main に入っても、マージ直後に検知できる。
+#     paths で絞っても保証は落ちない: 認可ルールもスキーマも
+#     amplify/data/resource.ts にあり、それらを壊す変更は必ず amplify/** を通る。
+#     絞らないと、ドキュメント修正のマージ1回ごとにデプロイと統合テストが走る
 #   - 常設の "ci" サンドボックスを使い回し、毎回のフルデプロイ（5〜7分）を避ける。
 #     スキーマ（バックエンド）を変えた PR の時だけ、隔離した使い捨ての
 #     サンドボックス pr-<番号> をデプロイして破棄する
@@ -46,7 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # ラベル opt-in の本体。PR では backend-ci ラベルが付いている時だけ実行する。
-    # main への push と手動実行（workflow_dispatch）は常に実行する。
+    # push と手動実行（workflow_dispatch）はここでは絞らない。push の絞り込みは
+    # 上の on.push.paths が既に行っているため、ここへ来た時点で対象の変更がある。
     if: >-
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
