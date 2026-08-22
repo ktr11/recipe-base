@@ -9,6 +9,7 @@ import { useGuestImport } from '@/hooks/use-guest-import';
 import { ensureAccountReady } from '@/lib/auth/account';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { safeRedirect } from '@/lib/auth/redirect';
+import { syncThemeWithProfile } from '@/lib/user/profile';
 
 /**
  * サインイン（docs/design.md §3.1 / §8）
@@ -48,6 +49,9 @@ export default function SignInForm() {
           // チームが無いユーザーをここで救う（§2.7）。これを通さないと
           // 以降のレシピ操作が全て Unauthorized になる
           await ensureAccountReady();
+          // 端末とサーバーでテーマを揃える（§6.2）。この端末に選択が
+          // 無ければ、別端末で選んだテーマがここで復元される
+          await syncThemeWithProfile();
           // ゲストデータの引き継ぎは確認してから（§5.5）。既にレシピを持つ
           // チームに、試し打ちのダミーが黙って混入するのを防ぐ。
           // 引き継ぐものが無ければ、そのまま遷移する

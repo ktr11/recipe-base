@@ -13,6 +13,7 @@ import { useCallback, useState } from 'react';
 import GuestImportDialog from '@/components/auth/GuestImportDialog';
 import { useGuestImport } from '@/hooks/use-guest-import';
 import { ensureAccountReady } from '@/lib/auth/account';
+import { syncThemeWithProfile } from '@/lib/user/profile';
 import { authErrorMessage } from '@/lib/auth/errors';
 import { PASSWORD_RULE, validatePassword } from '@/lib/auth/password';
 import { DEFAULT_REDIRECT } from '@/lib/auth/redirect';
@@ -124,6 +125,11 @@ export default function SignUpForm() {
 
       // post-confirmation が失敗していた場合の復旧（§2.7）
       await ensureAccountReady();
+
+      // ゲストで選んだテーマをそのまま引き継ぐ（§6.2）。作られたばかりの
+      // UserProfile は既定値を持つので、押し上げないと登録の前後で
+      // 見た目が変わってしまう
+      await syncThemeWithProfile();
 
       // ゲストで作成したデータは確認せずに取り込む（§5.5）。登録直後は
       // 連続性への期待が最も高く、ダイアログは邪魔にしかならない。

@@ -320,6 +320,16 @@
     <code>&lt;html suppressHydrationWarning&gt;</code> とセットで機能する</dd>
     <dt>サーバー保存の位置づけ</dt>
     <dd><code>UserProfile.theme</code> は「別端末への同期用の控え」。読み込みで1クエリ増えるが、描画は既に完了しているので体感コストはゼロ</dd>
+    <dt>端末とサーバーを揃える規則</dt>
+    <dd>同期はサインイン直後の1回だけで、<strong>この端末に選択があればそれが正</strong>。
+    選択があればサーバーへ押し上げ、無ければサーバーの値を採用する。
+    ローカルを優先するのは、ゲストで <code>night</code> を選んだ直後に登録した人が、
+    作られたばかりの <code>UserProfile</code> の既定値 <code>light</code> で上書きされるのを防ぐため</dd>
+    <dt>諦めたもの</dt>
+    <dd>スキーマ既定値が <code>'light'</code> のため、サーバー側の <code>'light'</code> は
+    「light を選んだ」のか「まだ選んでいない」のか区別できない。採用してしまうと未選択の利用者が
+    新しい端末で OS のダークモード設定に従えなくなるので、既定値と一致する値は採用しない。
+    <strong>「light を明示的に選んだ」という状態だけが端末間で同期されない</strong></dd>
   </dl>
   <span class="ref">design.md §6.2</span>
 </div>

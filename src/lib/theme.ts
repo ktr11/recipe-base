@@ -15,6 +15,16 @@ export const THEMES = [
 
 export type ThemeId = (typeof THEMES)[number]['id'];
 
+/**
+ * 未選択のときに使われるテーマ。
+ *
+ * ⚠️ `UserProfile.theme` のスキーマ既定値（amplify/data/resource.ts）と
+ * 同じ値でなければならない。サーバー側の値がこれと一致する場合、
+ * 「まだ選んでいない」のか「light を選んだ」のかを区別できないため、
+ * 別端末への反映では採用しない（profile.ts の syncThemeWithProfile）。
+ */
+export const DEFAULT_THEME: ThemeId = 'light';
+
 export const THEME_STORAGE_KEY = 'recipe-base:theme';
 
 const THEME_IDS: readonly string[] = THEMES.map((t) => t.id);
