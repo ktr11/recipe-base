@@ -354,10 +354,16 @@
     <dt>問題</dt>
     <dd>認可の統合テストは<strong>デプロイ済みの実バックエンドを相手にする</strong>。価値は高いが、CI で毎回サンドボックスをフルデプロイ（5〜7分）すると AWS 料金と CI 時間が積み上がる</dd>
     <dt>採った案</dt>
-    <dd>PR では <code>backend-ci</code> ラベルを付けた時だけ実行し、<strong>main への push では保険として必ず実行する</strong>。
+    <dd>PR では <code>backend-ci</code> ラベルを付けた時だけ実行し、<strong>main への push では
+    バックエンド関連のパスが変わった時に必ず実行する</strong>（保険）。
     常設の <code>ci</code> サンドボックスを使い回し、スキーマを変えた PR の時だけ使い捨ての <code>pr-&lt;番号&gt;</code> をデプロイして破棄する</dd>
     <dt>ラベル opt-in だけにしない理由</dt>
     <dd>付け忘れで検証が抜ける。認可テストは本プロジェクトで最も重い失敗（<strong>他人の家族のレシピが見える</strong>）を守るテストであり、opt-in の裏に隠してはならない</dd>
+    <dt>逆に、保険を緩めすぎない</dt>
+    <dd>守るべきは「<strong>認可を壊し得る変更が main に入ったら必ず検証される</strong>」ことであって、
+    「マージのたびに走る」ことではない。認可ルールもスキーマも <code>amplify/data/resource.ts</code> にあるため、
+    push トリガーを <code>amplify/**</code> 等に絞っても保証は落ちず、ドキュメント修正のたびに
+    AWS へデプロイする無駄だけが消える</dd>
   </dl>
   <span class="ref">design.md §10.4</span>
 </div>
