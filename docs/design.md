@@ -841,16 +841,21 @@ describe.each([
 
 ### 11.3 デプロイの流れ
 
-```
-PR                     → ci.yml（lint / build / 単体テスト）
-                       → backend-ci ラベル時のみ、ci sandbox で統合テスト（§10.4）
+```mermaid
+flowchart TD
+    PR(["PR を出す"]) --> CI["ci.yml<br/>lint / build / 単体テスト"]
+    PR -.->|"backend-ci ラベルを付けた時だけ"| BE1["backend.yml"]
+    BE1 --> SB[("ci sandbox<br/>認可の統合テスト")]
 
-main にマージ          → Amplify アプリ① が main をビルド → dev 環境
-                       → backend.yml が ci sandbox で統合テスト（§10.4、従来どおり）
+    MG(["main にマージ"]) --> A1["Amplify アプリ①<br/>main を監視"]
+    A1 --> DEV[("dev 環境<br/>Basic 認証")]
+    MG -->|"バックエンド関連のパスが<br/>変わった時"| BE2["backend.yml"]
+    BE2 --> SB
 
-GitHub で Release 作成 → tag が生まれる（手入力。例 v0.2.0）
-                       → GitHub Actions が production ブランチを tag へ進める
-                       → Amplify アプリ② が production をビルド → prod 環境
+    RL(["GitHub で Release 作成"]) --> TG["tag が生まれる<br/>手入力・例 v0.2.0"]
+    TG --> GA["GitHub Actions<br/>production を tag へ進める"]
+    GA --> A2["Amplify アプリ②<br/>production を監視"]
+    A2 --> PRD[("prod 環境<br/>公開")]
 ```
 
 `production` は**人間が触らないブランチ**であり、CI だけが進める。tag が「不動の目印」であるのに対し、`production` は「今どこにいるかの目印」で役割が異なる。
