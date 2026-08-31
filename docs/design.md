@@ -814,3 +814,141 @@ describe.each([
 > **⚠️ この設計は「安さ」と「壊れた認可を main に通さない保証」の両立を狙ったもの。** ラベル opt-in だけにすると付け忘れで検証が抜けるため、main backstop を必ず併用する。認可テストは本プロジェクトで最も重い失敗（他人の家族のレシピが見える）を守るテストであり、opt-in の裏に隠してはならない。
 >
 > 逆に、**main backstop の起動条件を緩めすぎてもいけない。** 「main への push では常に実行する」と書いていた時期があるが、実装は当初からパスで絞られており、記述だけが実態と食い違っていた。守るべきは「認可を壊し得る変更が main に入ったら必ず検証される」ことであって、「マージのたびに走る」ことではない。
+
+---
+
+## 11. デプロイと環境
+
+### 11.1 環境の一覧
+
+| 環境 | 役割 | 作られ方 | データ保護 |
+|---|---|---|---|
+| 個人 sandbox | 開発中の試行錯誤 | 各自の `ampx sandbox` | 無し |
+| `ci` sandbox | 統合テストの検証台（§10.4） | GitHub Actions | 無し |
+| **dev** | **ホスティング上での動作確認と実機確認** | Amplify アプリ①（`main` を監視） | あり |
+| **prod** | 家族が使う本番 | Amplify アプリ②（`production` を監視） | あり |
+
+**AWS アカウントは1つ。Amplify アプリは2つ。**
+
+### 11.2 dev 環境が sandbox と別に必要な理由
+
+`ampx sandbox` は既に「AWS と結合した開発環境」であり、バックエンドの結合確認だけなら sandbox で足りる。dev がそれに足すのは次の2点だけである。
+
+- **ホスティング上でフロントが動く。** sandbox が用意するのはバックエンドだけで、フロントは常に手元の `pnpm dev`。本アプリは `middleware.ts` を持ち `/recipes/[id]` が動的なため、**ホスティング環境で SSR と middleware が実際に動くかは手元では確認できない**
+- **実機から触れる。** `localhost:3000` は手元だけ
+
+したがって **dev の存在意義は「バックエンドとの結合」ではなく「ホスティングとの結合」にある。** ここを取り違えると sandbox と役割が重複する。
+
+### 11.3 デプロイの流れ
+
+```
+PR                     → ci.yml（lint / build / 単体テスト）
+                       → backend-ci ラベル時のみ、ci sandbox で統合テスト（§10.4）
+
+main にマージ          → Amplify アプリ① が main をビルド → dev 環境
+                       → backend.yml が ci sandbox で統合テスト（§10.4、従来どおり）
+
+GitHub で Release 作成 → tag が生まれる（手入力。例 v0.2.0）
+                       → GitHub Actions が production ブランチを tag へ進める
+                       → Amplify アプリ② が production をビルド → prod 環境
+```
+
+`production` は**人間が触らないブランチ**であり、CI だけが進める。tag が「不動の目印」であるのに対し、`production` は「今どこにいるかの目印」で役割が異なる。
+
+ロールバックは **Amplify コンソールから前のビルドを再デプロイ**する。`production` を古い tag へ戻す方法もあるが force push が要り、慌てている時の操作としては危ない。
+
+### 11.4 なぜ `production` ブランチが必要か（tag を直接デプロイできない）
+
+当初の構想は「main にマージし、Release 時に tag を打ち、その tag を本番へデプロイする」だった。**これは実現できない。**
+
+- **Amplify Hosting は SSR アプリの手動デプロイ（zip アップロード）に対応していない。** 手動デプロイは静的サイト専用であり、SSR は Git 連携が必須
+- **Amplify Hosting は接続したブランチの先端しかビルドできない。** `start-job` には `--commit-id` があるが、これは「サードパーティのリポジトリから来たコミット ID」を記録するメタデータであり、ビルド対象を選ぶものではない（`--job-type RELEASE` の定義が "starts a new job with **the latest change from the specified branch**"）
+
+したがって **prod は「ブランチ」でなければならない。** `production` を tag へ進める一段が挟まるのは、この制約への対応である。
+
+> 代案として、prod アプリも `main` に接続して自動ビルドを切り、Release 時に `start-job` を叩く形もある。ブランチは増えないが、**ビルドされるのは tag ではなくその瞬間の main の先端**になる。一人開発ではマージのタイミングを自分が握っているため踏まない穴だが、**tag が本番の中身を保証しなくなる**ため採用しない。`v0.2.0` が本番で動いているコードを指さないなら、tag を打つ意味が無い。
+
+### 11.5 Amplify アプリを2つに分ける理由
+
+**Amplify Hosting のサービスロールはアプリ単位**であり、ブランチ単位ではない。1アプリ2ブランチにすると、dev と prod を同じロールが触る。
+
+「prod は別扱いにする」という方針を **IAM の境界として実際に表現する**ためにアプリを分ける。分けなければ、方針を決めても構成上は何も変わらない。
+
+なお **Amplify が Git 連携でビルドすると、バックエンドのデプロイも Amplify のビルドの中で起きる**（`amplify.yml` が `ampx pipeline-deploy` を叩く）。したがって GitHub Actions にデプロイ用の AWS クレデンシャルは不要で、既存の `AWS_CI_ROLE_ARN` は**統合テスト専用**として残る。
+
+> **⚠️ 統合テストを dev / prod に対して実行してはならない。** `tests/integration/helpers/cleanup.ts` は、認可上 GraphQL から削除できない `Team` / `UserProfile` を消すために `ListTables` でテーブル名を引いて `DeleteItem` を直接叩く。しかも後片付けの失敗は握りつぶす。本番を向いた瞬間に家族のデータが静かに消える。実行先は sandbox に限る。
+
+### 11.6 統合テストを dev に寄せない理由
+
+dev は main を追う環境であり、`ci` sandbox と役割が重なるように見える。それでも統合させない。
+
+- **順序の問題。** main への push で Amplify が非同期にビルドを始めるため、GitHub Actions 側はデプロイ完了を待つ必要が生じる。避けるには Amplify のビルド内でテストを走らせることになり、今度は **Amplify のサービスロールに `DeleteItem` と `AdminDeleteUser` が要る**。§11.5 で狭めた方向と逆になる
+- **dev は人間が触る場所。** 上記のとおりテストはレコードを直接消すので、確認中にデータが消える環境になる
+
+`ci` は**使い捨ての検証台**、dev は**人間が触る場所**であり、同じにすると片方の都合がもう片方を壊す。追加コストはほぼゼロ（DynamoDB は on-demand、Cognito は無料枠内）。
+
+### 11.7 データ保護（deletionProtection と PITR）
+
+`backend.ts` に以下を加える。
+
+```ts
+const isSandbox =
+  backend.stack.node.tryGetContext('amplify-backend-type') === 'sandbox';
+
+if (!isSandbox) {
+  const { amplifyDynamoDbTables } = backend.data.resources.cfnResources;
+  for (const table of Object.values(amplifyDynamoDbTables)) {
+    table.deletionProtectionEnabled = true;
+    table.pointInTimeRecoveryEnabled = true;
+  }
+}
+```
+
+**線を「prod かどうか」ではなく「sandbox かどうか」に引くのが要点。** これにより dev と prod の設定差が構造的に存在しなくなり、ブランチ名による分岐も要らない（両者とも `amplify-backend-type` が `branch`）。
+
+**なぜ dev も保護するのか**: prod にだけ保護を掛けると、**保護が効いた状態での移行手順を一度も試さないまま本番でぶつかる**ことになり、防壁を置いた意味が半減する。「自由に壊せる場所」の役割は既に sandbox が埋めているため、dev をそれに充てる必要がない。
+
+**なぜ sandbox を除外するのか**: `deletionProtectionEnabled` は CloudFormation の removal policy ではなく DynamoDB テーブル自身の属性であり、有効なテーブルは DynamoDB 側が削除を拒否する。`backend.yml` 末尾の使い捨てサンドボックス破棄（`ampx sandbox delete --identifier pr-<番号>`）が失敗し、**環境が AWS 上に残り続けてコストになる**（§10.4）。
+
+このスキーマでテーブルの作り直し＝データ消失を招く変更は次のとおり。`Team` と `UserProfile` は `identifier` を明示しているため（§1.2）、下2つは現実の危険である。
+
+| 変更 | 結果 |
+|---|---|
+| モデル名の変更 | テーブル作り直し。**全消失** |
+| `.identifier()` の変更 | テーブル作り直し。**全消失** |
+| フィールドの削除 | データは残るが GraphQL から見えなくなる |
+| セカンダリインデックスの変更 | GSI の作り直し（データは残る） |
+
+> **この保護の目的は「静かなデータ消失」を「うるさいデプロイ失敗」に変換することにある。** 破壊的変更が届いても CloudFormation がテーブルを消せずにデプロイが落ち、データは無傷で残る。§2.3 が招待コードの期限判定に TTL を却下したのも（失敗が最大48時間気付けないため）、§1.6 がラベル削除に読み込み時の防衛線を置いたのも同じ考え方である。
+
+**破壊的変更は PR では検出できない。** PR の統合テストは sandbox（保護なし）で走るため素通りし、**main にマージした時点で dev のデプロイ失敗として現れる。** これは欠陥ではなく、dev が prod と同じ条件を持つことの効果である。
+
+移行スクリプトと、その検証に使うデータは**必要になってから作る。** 取れる手はモデル名の変更なのかキーの変更なのかで変わり、先に手順を設計しても当たらない。
+
+### 11.8 メール送信は Cognito の既定のまま
+
+本アプリはメールが届かないと何もできない（サインアップの確認コード、パスワードリセット、§2.4 / §8）。それでも SES は使わず、Cognito の既定の送信を使う。
+
+- 既定の上限は **1日50通**。家族5人がサインアップして5通、あとはパスワードを忘れた時だけなので使い切らない
+- 実害があるとすれば送信元が `no-reply@verificationemail.com` で迷惑メール判定されやすいこと
+
+**この判断は後から取り消せる。** §6.2 が警告する Cognito のカスタム属性は User Pool の作成時に凍結されるが、**メール設定は `UpdateUserPool` で後から変更できる。** 実際に「メールが来ない」問題が起きた時点で SES へ切り替えればよい。
+
+> SES を使う場合、**アカウントを SES のサンドボックスから出す申請が必須**である。「サンドボックスのまま家族のアドレスだけ個別に検証する」という抜け道は無い。
+
+### 11.9 アクセス制御
+
+- **dev には Basic 認証**を掛ける（Amplify Hosting のブランチ単位のパスワード保護）
+- **prod には掛けない。** 家族が使うため
+
+prod が公開でも問題にならないのは、§1.2 の認可がすべて「`teamId` と同名の Cognito グループに所属しているか」の1問に還元されているためである。見知らぬ人がサインアップしても `post-confirmation` がその人だけの個人チームを作り（§2.4）、家族のチームには構造的に到達できない。家族チームへの唯一の経路は招待コードで、1時間で失効する（§2.3）。
+
+URL は `xxx.amplifyapp.com` のまま始める。独自ドメインは後から追加できる。
+
+### 11.10 未確定の事項
+
+> **⚠️ Amplify Hosting が Next.js 16 を扱えるかは未確認。** AWS のドキュメントは現在も「up through Next.js 15」であり、16 の記載が無い。本リポジトリは `next@16.2.10`。
+>
+> **確認は実際に1回デプロイして事実を確定させる。** 通らなかった場合は **Next 15 へ降格**する。降格が安いことは確認済みで、サーバーコンポーネント4つ（`page.tsx`・sign-in・sign-up・reset-password）はいずれも `params` / `searchParams` を受け取らず、Suspense で包んだクライアント子を並べるだけの静的な殻である。`?redirect=` や `?email=` の読み取りはすべてクライアント側の `useSearchParams()`。`middleware.ts` は Next 15 では改名不要の正しい名前（16 で `proxy` に改名された）。実質 `pnpm add next@15 eslint-config-next@15` で済む。
+>
+> 静的書き出し（`output: 'export'`）に倒せば Next のバージョン問題は消えるが、`middleware.ts` を捨て `/recipes/[id]` を `?id=` 形式に変える必要があるため採らない。
