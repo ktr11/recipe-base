@@ -1,0 +1,64 @@
+# Amplify Hosting のビルド仕様（docs/design.md §11）
+#
+# ⚠️ これは第1段の暫定形で、**バックエンドをデプロイしない**。
+#
+# 目的は「Next.js 16 が Amplify Hosting で動くか」を単独で確かめること。
+# AWS のドキュメントは現在も "up through Next.js 15" であり、16 の記載が無い
+# （§11.10）。フル構成で一度に動かすと、失敗したときの原因候補が
+#
+#   Node / pnpm がビルド環境で使えるか、pipeline-deploy が IAM で通るか、
+#   next build が通るか、SSR と middleware がランタイムで動くか
+#
+# の4つに増える。知りたいのは最後の1つなので、他を先に取り除く。
+#
+# 確認が済んだら backend フェーズを足す:
+#
+#   backend:
+#     phases:
+#       build:
+#         commands:
+#           - pnpm exec ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+#
+# その時点で ensure-amplify-outputs.mjs の呼び出しは不要になる
+# （pipeline-deploy が本物の amplify_outputs.json を生成するため）。
+
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        # ci.yml と同じ Node 22 に揃える。ビルド環境の既定に依存しない
+        - nvm install 22
+        - nvm use 22
+
+        # パッケージマネージャーは package.json の packageManager で固定した
+        # pnpm を使う（npm / yarn は使わない）。corepack がその指定を読む。
+        # 非対話環境ではダウンロードの確認プロンプトで止まるため無効化する
+        - export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+        - corepack enable
+
+        - pnpm install --frozen-lockfile
+
+        # ⚠️ 第1段だけの措置。フロントエンドは amplify_outputs.json を静的に
+        # インポートするが、このファイルはバックエンドのデプロイ時に生成される
+        # Git 管理外のもの。backend フェーズを持たない今は存在しないため、
+        # ビルドを通すためのプレースホルダを置く（ci.yml と同じ手口）。
+        #
+        # このままではアプリは AWS に接続できない。それでよい。
+        # ここで確かめたいのはビルドと SSR の成否であって、動作ではない。
+        - node scripts/ensure-amplify-outputs.mjs
+
+    build:
+      commands:
+        - pnpm build
+
+  artifacts:
+    # Next.js の SSR を Amplify Hosting compute に載せる場合の既定
+    baseDirectory: .next
+    files:
+      - '**/*'
+
+  cache:
+    paths:
+      - .next/cache/**/*
+      - node_modules/**/*
