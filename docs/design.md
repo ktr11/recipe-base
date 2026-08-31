@@ -272,19 +272,22 @@ cognito-idp:AdminListGroupsForUser
 
 ### 2.4 フロー: サインアップ（個人チーム生成）
 
-```
-ユーザーがメール確認コードを入力
-  ↓
-Cognito が post-confirmation トリガーを起動
-  ↓
-Lambda:
-  1. teamId を生成（`crypto.randomUUID()`）
-  2. Cognito グループ `${teamId}` を作成
-  3. ユーザーを当該グループに追加
-  4. Team レコードを作成（name: "マイレシピ", memberCount: 1）
-  5. UserProfile を作成（userId: sub, teamId, displayName: メールのローカル部, theme: 'light'）
-  ↓
-クライアント: fetchAuthSession({ forceRefresh: true }) で新グループのクレームを取得
+```mermaid
+flowchart TD
+    U(["ユーザーがメール確認コードを入力"]) --> T["Cognito が post-confirmation<br/>トリガーを起動"]
+
+    subgraph L["post-confirmation Lambda"]
+        direction TB
+        L1["1. teamId を生成<br/>crypto.randomUUID()"]
+        L2["2. Cognito グループ teamId を作成"]
+        L3["3. ユーザーを当該グループに追加"]
+        L4["4. Team レコードを作成<br/>name: マイレシピ / memberCount: 1"]
+        L5["5. UserProfile を作成<br/>userId: sub / teamId /<br/>displayName: メールのローカル部 / theme: light"]
+        L1 --> L2 --> L3 --> L4 --> L5
+    end
+
+    T --> L1
+    L5 --> R(["クライアント:<br/>fetchAuthSession（forceRefresh: true）で<br/>新グループのクレームを取得"])
 ```
 
 > **⚠️ このトリガーが失敗しても、ユーザーの確認自体は既に完了している。** 結果「確認済みだがチームが無い」ユーザーが生まれ、以後すべての画面が空になる。対策として §2.7 の自己修復パスを必ず実装する。
@@ -299,28 +302,35 @@ Lambda:
 
 `joinTeam(inviteCode)` の処理順序。**この順序に意味がある。**
 
-```
- 1. 呼び出し元の sub を event.identity から取得
- 2. inviteCode で Team を検索          → 見つからなければ「無効なコード」
- 3. inviteCodeExpiresAt > now を検証   → 失効していれば「期限切れ」
- 4. memberCount < 20 を検証            → 超過なら「満員」
- 5. 参加先 == 現在の所属 を検証        → 同一なら「既に参加済み」
- 6. 新チームの Cognito グループにユーザーを追加   ← 先に権限を付与
- 7. **旧チームが1人チームの場合のみ** Recipe / Label の teamId を新チームへ書き換え
- 8. UserProfile.teamId を新チームへ更新
- 9. 新チームの memberCount をインクリメント
-10. 旧チームの後始末:
-      1人チームだった場合 → Team レコードと Cognito グループを削除
-      他にメンバーが居る場合 → memberCount をデクリメントし、旧グループから自分を外す
-11. （1人チームだった場合、グループごと消えるため 10 で完了。
-      `AdminRemoveUserFromGroup` は呼ばない。消えたグループを指定すると失敗する）
-  ↓
-クライアント:
-  fetchAuthSession({ forceRefresh: true })  ← 必須。旧トークンには新グループが無い
-  → /recipes へ遷移
+```mermaid
+flowchart TD
+    S(["クライアントが joinTeam を呼ぶ"]) --> N1["1. 呼び出し元の sub を<br/>event.identity から取得"]
+    N1 --> N2["2. inviteCode で Team を検索"]
+    N2 -->|"見つからない"| E1(["無効なコード"])
+    N2 --> N3["3. 有効期限を検証<br/>inviteCodeExpiresAt が現在時刻より後か"]
+    N3 -->|"失効"| E2(["期限切れ"])
+    N3 --> N4["4. memberCount が 20 未満かを検証"]
+    N4 -->|"超過"| E3(["満員"])
+    N4 --> N5["5. 参加先が現在の所属と同じかを検証"]
+    N5 -->|"同一"| E4(["既に参加済み"])
+    N5 --> N6["6. 新チームの Cognito グループに<br/>ユーザーを追加<br/>（先に権限を付与する）"]
+    N6 --> Q1{"旧チームは<br/>1人チームか"}
+    Q1 -->|"はい"| N7["7. Recipe / Label の teamId を<br/>新チームへ書き換え"]
+    Q1 -->|"いいえ（他にメンバーが居る）"| N8
+    N7 --> N8["8. UserProfile.teamId を新チームへ更新"]
+    N8 --> N9["9. 新チームの memberCount を +1"]
+    N9 --> Q2{"旧チームは<br/>1人チームだったか"}
+    Q2 -->|"はい"| N10a["10a. Team レコードと<br/>Cognito グループを削除"]
+    Q2 -->|"いいえ"| N10b["10b. memberCount を -1 し<br/>旧グループから自分を外す"]
+    N10a --> F(["クライアント:<br/>fetchAuthSession（forceRefresh: true）<br/>→ /recipes へ遷移"])
+    N10b --> F
 ```
 
-**手順6を7より前に置く理由**: Lambda は IAM 認可でデータを書き換えるため厳密には順序依存しないが、6→7→11 の順序により、処理が途中で失敗した場合でもユーザーは**新旧どちらかのグループには必ず所属している**状態が保たれ、データにアクセスできなくなる事態を避けられる。
+> **手順 10a で `AdminRemoveUserFromGroup` を呼ばないのは意図的。** グループごと削除すれば所属も消えるため、消えたグループを指定すると失敗する。
+>
+> 末尾の `fetchAuthSession（forceRefresh: true）` は**必須**である。旧トークンには新グループが入っていない。
+
+**手順6を7より前に置く理由**: Lambda は IAM 認可でデータを書き換えるため厳密には順序依存しないが、6→7→10 の順序により、処理が途中で失敗した場合でもユーザーは**新旧どちらかのグループには必ず所属している**状態が保たれ、データにアクセスできなくなる事態を避けられる。
 
 > **⚠️ 手順7 の条件（実装時に判明）**: 当初この手順は「旧チームは必ず1人チーム」という前提で書かれていたが、**家族チームに属するメンバーが別のチームへ移る経路があるため、旧チームに他メンバーが残る状況は実際に起こる**。その場合に全件移すと、残るメンバーからレシピを奪うことになる。したがって移送は旧チームが1人だった場合に限る。持ち出さない扱いは離脱（§2.6）と共通の方針である。
 
@@ -330,19 +340,20 @@ Lambda:
 
 `leaveTeam()`。**離脱者はレシピを一切持ち出さない**（確定事項）。
 
+```mermaid
+flowchart TD
+    S(["クライアントが leaveTeam を呼ぶ"]) --> N1["1. 新しい個人チームを作成<br/>teamId / Cognito グループ / Team レコード"]
+    N1 --> N2["2. ユーザーを新グループに追加"]
+    N2 --> N3["3. UserProfile.teamId を新個人チームへ更新"]
+    N3 --> N4["4. 旧チームの memberCount を -1"]
+    N4 --> Q{"デクリメント結果が 0 か"}
+    Q -->|"0（誰も居なくなった）"| N5["5. 旧チームの Recipe / Label を全削除<br/>Team レコードを削除<br/>Cognito グループを削除"]
+    Q -->|"1 以上"| N6["6. 旧 Cognito グループから<br/>ユーザーを削除"]
+    N5 --> F(["クライアント:<br/>fetchAuthSession（forceRefresh: true）"])
+    N6 --> F
 ```
- 1. 新しい個人チーム（teamId, Cognito グループ, Team レコード）を作成
- 2. ユーザーを新グループに追加
- 3. UserProfile.teamId を新個人チームへ更新
- 4. 旧チームの memberCount をデクリメント
- 5. デクリメント結果が 0 の場合:
-      旧チームの Recipe / Label を全削除
-      Team レコードを削除
-      Cognito グループを削除
- 6. 旧 Cognito グループからユーザーを削除
-  ↓
-クライアント: fetchAuthSession({ forceRefresh: true })
-```
+
+> **手順5と手順6は排他である。** 手順5でグループごと削除した場合は所属も消えるため、`AdminRemoveUserFromGroup` を呼ばない（§2.5 の 10a と同じ理由）。逆に他にメンバーが残る場合は手順6を必ず行う。**忘れると、離脱したはずのチームのレシピが読めたままになる。**
 
 **UI 側の必須要件**: 離脱ボタンには「**レシピはチームに残り、あなたの手元には残りません**」と明示する確認モーダルを置く。これが無いと、誤操作で自分のレシピを失ったという事故が発生する。
 
@@ -392,10 +403,13 @@ Lambda:
 
 **同一ルートを共有し、データ層のみ差し替える。**
 
-```
-RecipeRepository (interface)
-  ├── LocalStorageRepository  … ゲスト。トライアル制限の強制もここ（§4）
-  └── AmplifyRepository       … 正規ユーザー
+```mermaid
+flowchart TD
+    V["画面コンポーネント<br/>（データがどこに保存されるかを知らない）"] --> I["RecipeRepository<br/>interface"]
+    I --> LS["LocalStorageRepository<br/>ゲスト。トライアル制限の強制もここ（§4）"]
+    I --> AR["AmplifyRepository<br/>正規ユーザー"]
+    LS --> D1[("localStorage")]
+    AR --> D2[("DynamoDB")]
 ```
 
 画面コンポーネントは「データがどこに保存されるか」を一切知らない。`/trial/recipes` のような別ルートを設けると**レシピ UI 一式を2系統保守する**ことになり、片方だけ修正して挙動がズレる事故が確実に起きるため採用しない。
@@ -449,13 +463,16 @@ RecipeRepository (interface)
 
 **強制は Repository 層、表示はフック。**
 
-```
-LocalStorageRepository.createRecipe()
-  └─ 内部で保有件数を検査し、超過していれば TrialLimitError を throw
-       ← ここが唯一の関門
+```mermaid
+flowchart TD
+    subgraph EN["強制（Repository 層）"]
+        A["LocalStorageRepository.createRecipe()"] --> B["保有件数を検査し、超過していれば<br/>TrialLimitError を throw"]
+        B --> C(["ここが唯一の関門"])
+    end
 
-useTrialLimits()
-  └─ 「残り何件か」を返すだけ。判定の責任は持たない（表示専用）
+    subgraph DP["表示（フック）"]
+        D["useTrialLimits()"] --> E["「残り何件か」を返すだけ<br/>判定の責任は持たない"]
+    end
 ```
 
 判定をコンポーネントやフックにのみ置くと、**新しい作成経路（複製機能、インポート等）を追加した人がチェックを書き忘れる**のが典型的な壊れ方になる。Repository 層に置けば、どの経路から作成しても必ずこの1点を通る。
@@ -525,16 +542,15 @@ Amplify Gen 2 の `allow.guest()` は**所有者ベースの分離ができな�
 
 引き継ぎは `post-confirmation` Lambda では実行できない（Lambda から localStorage は見えない）。**サインイン後のクライアント側**で実行する。
 
-```
-サインアップ → post-confirmation Lambda が個人チームを作成
-  ↓
-fetchAuthSession({ forceRefresh: true })   ← 新グループのクレームを取得
-  ↓
-UserProfile の存在を確認（無ければ repairAccount / §2.7）
-  ↓
-localStorage を読み、DynamoDB へ書き込み
-  ↓
-全件成功後に localStorage をクリア
+```mermaid
+flowchart TD
+    A(["サインアップ"]) --> B["post-confirmation Lambda が<br/>個人チームを作成"]
+    B --> C["fetchAuthSession（forceRefresh: true）<br/>新グループのクレームを取得"]
+    C --> Q{"UserProfile が存在するか"}
+    Q -->|"無い"| R["repairAccount を呼ぶ（§2.7）"]
+    Q -->|"ある"| W
+    R --> W["localStorage を読み<br/>DynamoDB へ書き込み"]
+    W --> Z(["全件成功後に localStorage をクリア"])
 ```
 
 > **⚠️ この順序を守らないと、まだ権限のないトークンで書き込むことになり全て Unauthorized になる。**
