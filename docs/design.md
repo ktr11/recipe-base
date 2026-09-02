@@ -1014,4 +1014,10 @@ dev アプリでは、Amplify が SSR 用に自動生成した `AmplifySSRLoggin
 - 信頼ポリシーが許すのは `amplify.amazonaws.com` のみで、Lambda のサービスプリンシパルは含まれない
 - **`computeRoleArn` が `null`** であり、SSR の実行時にアプリのコードへ渡される AWS 認証情報が存在しない。アプリコードはそもそも AWS の権限を持たない
 
-> **⚠️ prod アプリでは、このロールを使い回してはならない。** §11.5 でアプリを2つに分けたのは、サービスロールがアプリ単位でしか設定できず、**dev と prod を同じロールが触る状態を避ける**ためである。prod アプリには専用のサービスロールを作る。dev で自動生成のロールをそのまま使えたことは、prod でも同じでよい理由にはならない。
+> **⚠️ prod アプリでは、この「ロールの実体」を使い回してはならない。** §11.5 でアプリを2つに分けたのは、サービスロールがアプリ単位でしか設定できず、**dev と prod を同じロールが触る状態を避ける**ためである。
+>
+> **問題にしているのは権限セットではない。** `pipeline-deploy` がバックエンドを作るには `AmplifyBackendDeployFullAccess` が要り、prod も同じことをするので**削る余地はほとんど無い**。避けたいのは、prod アプリの `iamServiceRoleArn` に dev の `AmplifySSRLoggingRole-ff115093-*` をそのまま指定することである。
+>
+> 実務上は意識せずとも達成される。prod アプリを作れば Amplify が**別 UUID の `AmplifySSRLoggingRole-*` を自動生成する**ため、dev と同じ手順（自動生成されたロールに `AmplifyBackendDeployFullAccess` を付ける）を踏めばよい。**選んではいけないのは「既存のロールを使う」という選択肢だけ。**
+
+> **混同しないこと**: 「prod 用ロールから破壊的な権限を落とす」という §11.5 の方針は、**このデプロイ用ロールの話ではない**。対象は統合テストが使う `AWS_CI_ROLE_ARN` の方で、`tests/integration/helpers/cleanup.ts` が `ListTables` → `DeleteItem` を直接叩くためである。デプロイ用ロールは CloudFormation を触るだけで、そもそも `DeleteItem` を必要としない。
