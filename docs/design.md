@@ -979,6 +979,7 @@ AWS のドキュメントは現在も「up through Next.js 15」で 16 の記載
 - `next build`（Turbopack）が成功し、ルート構成は手元と一致（`ƒ /recipes/[id]` と `ƒ Proxy (Middleware)` の両方が出力された）
 - **`/team` を直接開くと `/auth/sign-in?redirect=%2Fteam` にリダイレクトされた**
 - pnpm（corepack）と Node 22 もビルド環境でそのまま動いた
+- **`aws amplify get-app` の `platform` が `WEB_COMPUTE`**（静的配信なら `WEB`）。AWS 自身の申告であり、推論の余地がない
 
 > **リダイレクトの有無が判別条件になるのは、このアプリで唯一サーバーを必要とするのが `middleware.ts` だからである。** ほとんどのページはクライアントコンポーネントで、静的配信でも SSR でも同じように動いてしまう。`src/app/team/page.tsx` はクライアント側のリダイレクトを一切持たない（§3.2 により middleware に委ねている）ため、`/team` が飛ばされたことは middleware がサーバー側で走った証拠になる。**ゲスト画面が開けたことは判別材料にならない。**
 >
@@ -1003,3 +1004,14 @@ AWS のドキュメントは現在も「up through Next.js 15」で 16 の記載
 `pnpm install --frozen-lockfile` は26秒しかかからない。**キャッシュしない方が速い。** キャッシュ対象は `.next/cache` のみとする。
 
 > `nvm install 22` が `/root/.nvm/default-packages` を読み、`@aws-amplify/cli`（Gen 1）・bower・cypress・grunt-cli・hugo-extended・vuepress・yarn を毎回インストールしており、59秒かかっている。**このプロジェクトでは1つも使わないが、これは直さない。** 回避にはビルド環境の挙動に賭ける必要があり、59秒のために失敗リスクを持ち込む価値がない。
+
+### 11.12 サービスロールについての注意
+
+dev アプリでは、Amplify が SSR 用に自動生成した `AmplifySSRLoggingRole-*` が**そのままデプロイ用のサービスロール（`iamServiceRoleArn`）にもなっている**。`AmplifyBackendDeployFullAccess` が付いており、追加の設定なしに `pipeline-deploy` が通る。
+
+**これは権限の昇格経路にはならない。** 確認した事実は次のとおり:
+
+- 信頼ポリシーが許すのは `amplify.amazonaws.com` のみで、Lambda のサービスプリンシパルは含まれない
+- **`computeRoleArn` が `null`** であり、SSR の実行時にアプリのコードへ渡される AWS 認証情報が存在しない。アプリコードはそもそも AWS の権限を持たない
+
+> **⚠️ prod アプリでは、このロールを使い回してはならない。** §11.5 でアプリを2つに分けたのは、サービスロールがアプリ単位でしか設定できず、**dev と prod を同じロールが触る状態を避ける**ためである。prod アプリには専用のサービスロールを作る。dev で自動生成のロールをそのまま使えたことは、prod でも同じでよい理由にはならない。
