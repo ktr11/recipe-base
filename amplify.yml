@@ -1,31 +1,18 @@
 # Amplify Hosting のビルド仕様（docs/design.md §11）
 #
-# ⚠️ これは第1段の暫定形で、**バックエンドをデプロイしない**。
+# backend フェーズが amplify_outputs.json を生成し、frontend フェーズが
+# それを取り込んでビルドする。この順序は Amplify が保証している。
 #
-# 目的は「Next.js 16 が Amplify Hosting で動くか」を単独で確かめること。
-# AWS のドキュメントは現在も "up through Next.js 15" であり、16 の記載が無い
-# （§11.10）。フル構成で一度に動かすと、失敗したときの原因候補が
-#
-#   Node / pnpm がビルド環境で使えるか、pipeline-deploy が IAM で通るか、
-#   next build が通るか、SSR と middleware がランタイムで動くか
-#
-# の4つに増える。知りたいのは最後の1つなので、他を先に取り除く。
-#
-# 確認が済んだら backend フェーズを足す:
-#
-#   backend:
-#     phases:
-#       build:
-#         commands:
-#           - pnpm exec ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
-#
-# その時点で ensure-amplify-outputs.mjs の呼び出しは不要になる
-# （pipeline-deploy が本物の amplify_outputs.json を生成するため）。
+# ⚠️ node_modules をキャッシュしないこと（§11.11）。pnpm の node_modules は
+# シンボリックリンクの林で、アーカイブ時に実体を辿ると内容が何重にも
+# 複製される。初回ビルドでは 4分29秒かけて作ったキャッシュが 5GB 超過で
+# 捨てられた。pnpm install は26秒しかかからないため、キャッシュしない方が速い。
 
 version: 1
-frontend:
+
+backend:
   phases:
-    preBuild:
+    build:
       commands:
         # ci.yml と同じ Node 22 に揃える。ビルド環境の既定に依存しない
         - nvm install 22
@@ -39,15 +26,20 @@ frontend:
 
         - pnpm install --frozen-lockfile
 
-        # ⚠️ 第1段だけの措置。フロントエンドは amplify_outputs.json を静的に
-        # インポートするが、このファイルはバックエンドのデプロイ時に生成される
-        # Git 管理外のもの。backend フェーズを持たない今は存在しないため、
-        # ビルドを通すためのプレースホルダを置く（ci.yml と同じ手口）。
-        #
-        # このままではアプリは AWS に接続できない。それでよい。
-        # ここで確かめたいのはビルドと SSR の成否であって、動作ではない。
-        - node scripts/ensure-amplify-outputs.mjs
+        # バックエンドをデプロイし、amplify_outputs.json を生成する。
+        # $AWS_BRANCH と $AWS_APP_ID は Amplify がビルド環境に渡す。
+        # アプリが分かれていれば同じブランチ名でもスタックは別になるため、
+        # dev と prod のバックエンドが混ざることはない（§11.5）
+        - pnpm exec ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
 
+frontend:
+  phases:
+    preBuild:
+      commands:
+        # backend フェーズで導入済み。フェーズをまたいでも同じ Node と
+        # pnpm を使うよう選び直しておく（数秒で終わる保険）
+        - nvm use 22
+        - corepack enable
     build:
       commands:
         - pnpm build
@@ -59,6 +51,6 @@ frontend:
       - '**/*'
 
   cache:
+    # node_modules は入れない（冒頭の警告を参照）
     paths:
       - .next/cache/**/*
-      - node_modules/**/*
