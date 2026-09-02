@@ -966,10 +966,40 @@ prod が公開でも問題にならないのは、§1.2 の認可がすべて「
 
 URL は `xxx.amplifyapp.com` のまま始める。独自ドメインは後から追加できる。
 
-### 11.10 未確定の事項
+### 11.10 Next.js 16 の可否（決着済み）
 
-> **⚠️ Amplify Hosting が Next.js 16 を扱えるかは未確認。** AWS のドキュメントは現在も「up through Next.js 15」であり、16 の記載が無い。本リポジトリは `next@16.2.10`。
+AWS のドキュメントは現在も「up through Next.js 15」で 16 の記載が無く、本リポジトリは `next@16.2.10` であるため、**Amplify Hosting で動くかを最大のリスクとして扱っていた。**
+
+**2026-08-31 の実機確認で、SSR として動くことを確認した。降格は不要。**
+
+検証は**フロントエンドだけをデプロイして行った**（`amplify.yml` に `backend` フェーズを持たせず、`amplify_outputs.json` は `scripts/ensure-amplify-outputs.mjs` のプレースホルダで代替）。フル構成で一度に動かすと、失敗時の原因候補が「Node / pnpm がビルド環境で使えるか」「`pipeline-deploy` が IAM で通るか」「`next build` が通るか」「SSR ランタイムが動くか」の4つに増えるためである。§10 が単体テストと統合テストを分けているのと同じ理屈。
+
+結果:
+
+- `next build`（Turbopack）が成功し、ルート構成は手元と一致（`ƒ /recipes/[id]` と `ƒ Proxy (Middleware)` の両方が出力された）
+- **`/team` を直接開くと `/auth/sign-in?redirect=%2Fteam` にリダイレクトされた**
+- pnpm（corepack）と Node 22 もビルド環境でそのまま動いた
+
+> **リダイレクトの有無が判別条件になるのは、このアプリで唯一サーバーを必要とするのが `middleware.ts` だからである。** ほとんどのページはクライアントコンポーネントで、静的配信でも SSR でも同じように動いてしまう。`src/app/team/page.tsx` はクライアント側のリダイレクトを一切持たない（§3.2 により middleware に委ねている）ため、`/team` が飛ばされたことは middleware がサーバー側で走った証拠になる。**ゲスト画面が開けたことは判別材料にならない。**
 >
-> **確認は実際に1回デプロイして事実を確定させる。** 通らなかった場合は **Next 15 へ降格**する。降格が安いことは確認済みで、サーバーコンポーネント4つ（`page.tsx`・sign-in・sign-up・reset-password）はいずれも `params` / `searchParams` を受け取らず、Suspense で包んだクライアント子を並べるだけの静的な殻である。`?redirect=` や `?email=` の読み取りはすべてクライアント側の `useSearchParams()`。`middleware.ts` は Next 15 では改名不要の正しい名前（16 で `proxy` に改名された）。実質 `pnpm add next@15 eslint-config-next@15` で済む。
->
-> 静的書き出し（`output: 'export'`）に倒せば Next のバージョン問題は消えるが、`middleware.ts` を捨て `/recipes/[id]` を `?id=` 形式に変える必要があるため採らない。
+> 静的配信に落ちていた場合、middleware は**エラーを出さずに存在しないのと同じ**になる。静かに壊れる類の失敗なので、明示的に確かめる必要があった。
+
+**降格が必要になった場合に備えた調査結果も残しておく**（将来 Amplify 側が 16 を扱えなくなる、あるいは 17 で同じ問題が起きた時のため）。サーバーコンポーネント4つ（`page.tsx`・sign-in・sign-up・reset-password）はいずれも `params` / `searchParams` を受け取らず、Suspense で包んだクライアント子を並べるだけの静的な殻である。`?redirect=` や `?email=` の読み取りはすべてクライアント側の `useSearchParams()`。`middleware.ts` は Next 15 では改名不要の正しい名前（16 で `proxy` に改名された）。実質 `pnpm add next@15 eslint-config-next@15` で済む。
+
+静的書き出し（`output: 'export'`）に倒せば Next のバージョン問題は消えるが、`middleware.ts` を捨て `/recipes/[id]` を `?id=` 形式に変える必要があるため採らない。
+
+### 11.11 ビルド仕様（`amplify.yml`）で踏んだこと
+
+**`node_modules` をキャッシュしてはならない。** 初回ビルドで実際に踏んだ:
+
+```
+15:23:52  ビルド完了
+15:28:21  キャッシュ作成完了        ← 4分29秒
+15:28:21  ! Unable to write cache: File size must be less than 5GB
+```
+
+**4分半かけて作ったキャッシュが 5GB 超過で捨てられた。** ビルド全体7分のうち4分半がこれに費やされている。原因は pnpm の `node_modules` が**シンボリックリンクの林**であることで、アーカイブ時に実体を辿ると同じ内容が何重にも複製されて容量が爆発する。
+
+`pnpm install --frozen-lockfile` は26秒しかかからない。**キャッシュしない方が速い。** キャッシュ対象は `.next/cache` のみとする。
+
+> `nvm install 22` が `/root/.nvm/default-packages` を読み、`@aws-amplify/cli`（Gen 1）・bower・cypress・grunt-cli・hugo-extended・vuepress・yarn を毎回インストールしており、59秒かかっている。**このプロジェクトでは1つも使わないが、これは直さない。** 回避にはビルド環境の挙動に賭ける必要があり、59秒のために失敗リスクを持ち込む価値がない。
