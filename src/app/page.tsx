@@ -10,7 +10,7 @@ import LandingActions from '@/components/auth/LandingActions';
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-6 p-6 text-center">
-      <h1 className="text-3xl font-bold">レシピ共有</h1>
+      <h1 className="text-3xl font-bold">Recipe Base</h1>
       <p className="text-base-content/70">
         レシピを保存し、家族で共有するためのアプリです。
         <br />
