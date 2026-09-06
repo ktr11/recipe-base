@@ -105,3 +105,35 @@ backend.teamFunction.addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId,
 );
+
+/**
+ * DynamoDB テーブルの保護（docs/design.md §11.7）
+ *
+ * 線を「prod かどうか」ではなく「sandbox かどうか」で引く。dev と prod は
+ * どちらも amplify-backend-type が 'branch' なので、両者の設定差が構造的に
+ * 存在しなくなり、ブランチ名による分岐も要らない。
+ *
+ * dev も保護するのは、prod にだけ掛けると「保護が効いた状態での移行手順」を
+ * 一度も試さないまま本番でぶつかるため。自由に壊せる場所の役割は sandbox が
+ * 既に埋めている。
+ *
+ * ⚠️ sandbox を除外するのは必須。deletionProtectionEnabled は CloudFormation の
+ * removal policy ではなく DynamoDB テーブル自身の属性で、有効なテーブルは
+ * DynamoDB 側が削除を拒否する。backend.yml 末尾の使い捨てサンドボックス破棄
+ * （ampx sandbox delete --identifier pr-<番号>）が失敗し、環境が AWS 上に
+ * 残り続けてコストになる（§10.4）。
+ *
+ * 狙いは「静かなデータ消失」を「うるさいデプロイ失敗」に変換すること。
+ * モデル名や identifier の変更のようなテーブル作り直しを伴う変更が届いても、
+ * CloudFormation がテーブルを消せずにデプロイが落ち、データは無傷で残る。
+ */
+const isSandbox =
+  backend.stack.node.tryGetContext('amplify-backend-type') === 'sandbox';
+
+if (!isSandbox) {
+  const { amplifyDynamoDbTables } = backend.data.resources.cfnResources;
+  for (const table of Object.values(amplifyDynamoDbTables)) {
+    table.deletionProtectionEnabled = true;
+    table.pointInTimeRecoveryEnabled = true;
+  }
+}
