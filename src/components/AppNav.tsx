@@ -12,7 +12,7 @@ export default function AppNav() {
     <header className="navbar bg-base-200">
       <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4">
         <Link href="/" className="btn btn-ghost text-lg">
-          レシピ共有
+          Recipe Base
         </Link>
         <nav className="flex flex-1 justify-end gap-1">
           <Link href="/recipes" className="btn btn-ghost btn-sm">

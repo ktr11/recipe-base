@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "レシピ共有",
+  title: "Recipe Base",
   description: "レシピを保存し、家族で共有するためのアプリ",
 };
 
