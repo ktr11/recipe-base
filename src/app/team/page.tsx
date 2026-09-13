@@ -13,6 +13,12 @@ import {
   remainingMinutes,
   renameTeam,
 } from '@/lib/team/api';
+import {
+  DISPLAY_NAME_MAX_LENGTH,
+  DISPLAY_NAME_RULE,
+  updateDisplayName,
+  validateDisplayName,
+} from '@/lib/user/profile';
 
 /**
  * チーム画面（docs/design.md §3.1 / §2.5 / §2.6）
@@ -23,6 +29,12 @@ import {
  * 「チームを作る」操作は無い。全ユーザーはサインアップ時に自分1人のチームを
  * 持っており（§0 変更点2）、家族チームは**そのチームに人を招くこと**で
  * できあがる。この画面がやるのは、招く・入る・抜けるの3つ。
+ *
+ * 自分の表示名の編集導線もここに置く（§8）。表示名が他人の目に触れるのは
+ * この画面を通る2経路（招く・入る）だけなので、「未設定かどうか」を
+ * 判別せず、常に現在値を見せてその場で直せる形にする。初期値はメールの
+ * ローカル部（§2.4）＝メールアドレスの一部なので、招く前に本人が
+ * 気付けることにも意味がある。
  */
 export default function TeamPage() {
   const router = useRouter();
@@ -36,6 +48,8 @@ export default function TeamPage() {
   const [inviteCode, setInviteCode] = useState('');
   const [name, setName] = useState('');
   const [leaving, setLeaving] = useState(false);
+  // null = 閲覧中。編集を始めると現在の表示名で初期化される
+  const [editingName, setEditingName] = useState<string | null>(null);
 
   const apply = useCallback((overview: TeamOverview) => {
     setTeam(overview);
@@ -82,6 +96,10 @@ export default function TeamPage() {
       setBusy(false);
     }
   };
+
+  const myDisplayName = team?.members.find(
+    (member) => member.userId === team.myUserId,
+  )?.displayName;
 
   if (loading) {
     return (
@@ -137,14 +155,66 @@ export default function TeamPage() {
           <section>
             <h2 className="text-lg font-semibold">メンバー（{team.members.length}人）</h2>
             <ul className="mt-2 flex flex-col gap-2">
-              {team.members.map((member) => (
-                <li key={member.userId} className="flex items-center gap-2">
-                  <span>{member.displayName}</span>
-                  {member.userId === team.myUserId && (
-                    <span className="badge badge-sm">あなた</span>
-                  )}
-                </li>
-              ))}
+              {team.members.map((member) => {
+                const isMe = member.userId === team.myUserId;
+
+                if (isMe && editingName !== null) {
+                  return (
+                    <li key={member.userId} className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={DISPLAY_NAME_MAX_LENGTH}
+                        autoComplete="nickname"
+                        className="input input-sm flex-1 min-w-40"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        disabled={busy || validateDisplayName(editingName) !== null}
+                        onClick={() =>
+                          perform(async () => {
+                            await updateDisplayName(editingName);
+                            setEditingName(null);
+                            return '表示名を変更しました';
+                          })
+                        }
+                      >
+                        保存
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        disabled={busy}
+                        onClick={() => setEditingName(null)}
+                      >
+                        キャンセル
+                      </button>
+                      <p className="w-full text-xs opacity-70">{DISPLAY_NAME_RULE}</p>
+                    </li>
+                  );
+                }
+
+                return (
+                  <li key={member.userId} className="flex items-center gap-2">
+                    <span>{member.displayName}</span>
+                    {isMe && (
+                      <>
+                        <span className="badge badge-sm">あなた</span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          disabled={busy}
+                          onClick={() => setEditingName(member.displayName)}
+                        >
+                          変更
+                        </button>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </section>
 
@@ -153,6 +223,11 @@ export default function TeamPage() {
             <p className="mt-1 text-sm opacity-70">
               コードを伝えると、このチームに参加してもらえます。有効期限は発行から1時間です。
             </p>
+            {myDisplayName && (
+              <p className="mt-1 text-sm opacity-70">
+                参加した人には、あなたは「{myDisplayName}」と表示されます。
+              </p>
+            )}
 
             {isInviteCodeValid(team.inviteCodeExpiresAt) && team.inviteCode ? (
               <div className="mt-2 flex flex-wrap items-center gap-3">
