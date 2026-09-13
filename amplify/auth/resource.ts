@@ -21,7 +21,7 @@ export const auth = defineAuth({
   loginWith: {
     email: {
       verificationEmailStyle: 'CODE',
-      verificationEmailSubject: '【レシピ共有】確認コード',
+      verificationEmailSubject: '【Recipe Base】確認コード',
       verificationEmailBody: (createCode) =>
         `確認コードは ${createCode()} です。アプリの画面に入力してください。`,
     },
