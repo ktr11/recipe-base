@@ -1,0 +1,41 @@
+name: Release
+
+# GitHub で Release を作成（publish）すると、その tag が指すコミットへ
+# production ブランチを進める。production を監視する Amplify アプリ②が
+# push を検知して本番をビルドする。docs/design.md §11.3 / §11.4 を参照。
+#
+# production は人間が触らないブランチであり、進めるのはこのワークフローだけ。
+# tag が「不動の目印」、production は「今どこにいるかの目印」で役割が異なる。
+#
+# ロールバックはこのワークフローでは行わない（Amplify コンソールから
+# 前のビルドを再デプロイする / §11.3）。そのため push に force は使わず、
+# 巻き戻しの push は非 fast-forward として失敗する。
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  advance-production:
+    runs-on: ubuntu-latest
+    steps:
+      # push には tag のコミットと production の履歴の両方が要るため
+      # 全履歴を取得する（shallow クローンからの push は拒否されることがある）
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Release の対象を誤って別ブランチにした場合の防波堤。
+      # main に無いコミットが本番に出ることを防ぐ
+      - name: tag が main の履歴上にあることを確認
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag ${{ github.event.release.tag_name }} のコミットが main の履歴上にありません"
+            exit 1
+          fi
+
+      - name: production を tag へ進める
+        run: git push origin "$GITHUB_SHA:refs/heads/production"
