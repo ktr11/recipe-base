@@ -917,7 +917,7 @@ flowchart TD
     A2 --> PRD[("prod 環境<br/>公開")]
 ```
 
-`production` は**人間が触らないブランチ**であり、CI だけが進める。tag が「不動の目印」であるのに対し、`production` は「今どこにいるかの目印」で役割が異なる。
+`production` は**人間が触らないブランチ**であり、CI（`.github/workflows/release.yml`）だけが進める。ワークフローは tag のコミットが main の履歴上にあることを検証してから push する（Release の対象ブランチを誤った場合の防波堤）。tag が「不動の目印」であるのに対し、`production` は「今どこにいるかの目印」で役割が異なる。
 
 ロールバックは **Amplify コンソールから前のビルドを再デプロイ**する。`production` を古い tag へ戻す方法もあるが force push が要り、慌てている時の操作としては危ない。
 
