@@ -67,12 +67,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### バックエンド（`amplify/`）
 
 - `data/resource.ts` — 4モデル（`Team` / `Recipe` / `Label` / `UserProfile`）と
-  4カスタムミューテーション（`repairAccount` / `issueInviteCode` / `joinTeam` /
-  `leaveTeam`）。Cognito グループ名は `teamId` の値そのものであり、`Team` は
+  カスタム操作（チーム系: `repairAccount` / `issueInviteCode` / `joinTeam` /
+  `leaveTeam`、画像系: `getImageUploadUrl` / `getImageViewUrls` / `deleteImage`）。
+  Cognito グループ名は `teamId` の値そのものであり、`Team` は
   `teamId` を主キーにして自動採番の `id` を使わない
-- カスタムミューテーションは **1つの Lambda**（`functions/team/handler.ts`）に
+- カスタム操作は **1つの Lambda**（`functions/team/handler.ts`）に
   集約し、`fieldName` で分岐する。Cognito グループの作成・所属変更は Admin API
   でしか行えないため、これらは Lambda でなければ実装できない
+- `storage/resource.ts` — レシピ画像の S3 バケット（`docs/design.md §7.1`）。
+  アクセスルールは `allow.resource(teamFunction)` のみで、**クライアントには
+  S3 を一切触らせない**。Storage のアクセスルールは動的な teamId グループを
+  表現できないため、Lambda が「key の teamId とグループ所属の突き合わせ」を
+  行ってから署名付き URL を発行する。この形を `allow.authenticated` 等に
+  緩めないこと。`keepOnDelete: true` はテーブルの削除保護と同方針
+  （sandbox は設定に関係なく常に削除される）
 - `auth/post-confirmation/` — サインアップ確認後に「個人チーム」を作る。
   全ユーザーは常に何らかのチームに属し、「個人」はメンバー1人のチームとして
   表現される（専用の概念は無い）。チーム生成の共通処理は `shared/personal-team.ts`
@@ -150,7 +158,6 @@ auth/resource.ts を設計に合わせて修正 → commit
 
 聞かれない限り、以下を実装したり提案したりしない。すべて意図的な除外:
 
-- レシピ画像（`Recipe.imageKey` はフィールドのみ予約）
 - チーム内のロール（管理者/一般）とメンバーの追放
 - 複数チームへの同時所属
 - リアルタイム同期（`observeQuery`）
