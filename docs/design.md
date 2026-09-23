@@ -741,7 +741,7 @@ Chrome で実測した結果（ゲスト状態、`/`）:
 
 そのため S3 へのアクセスを **`teamFunction`（Lambda）に集約**する:
 
-- storage のアクセスルールは `allow.resource(teamFunction)` のみ。クライアントの資格情報では S3 に触れない
+- storage にはアクセスルールを一切書かず、クライアントの資格情報では S3 に触れない。Lambda への権限付与とバケット名の受け渡しは `backend.ts` が CDK で明示的に行う（専用スタック `MediaBucketAccess` のポリシー + `addEnvironment`。`CognitoGroupAccess` と同じパターン）。公式の `allow.resource(teamFunction)` を使わないのは、その経路の環境変数（SSM 経由で実行時解決）が data のカスタムミューテーションのハンドラを兼ねる関数では Lambda に載らないことを CI で確認したため
 - キーは `media/<teamId>/<uuid>.jpg` に固定し、採番は Lambda が行う。クライアントはキーを選べない
 - `getImageUploadUrl`（PUT 用）/ `getImageViewUrls`（GET 用・バッチ）/ `deleteImage` の3操作すべてで、Lambda が「key の teamId 部分が呼び出し元の `cognito:groups` に含まれるか」を検証してから署名付き URL の発行・削除を行う。**中心規則の S3 への延長はこの検証そのもの**であり、統合テスト（`tests/integration/images.test.ts`）が他チームのキーの拒否を検証している
 

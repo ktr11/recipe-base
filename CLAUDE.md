@@ -75,12 +75,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   集約し、`fieldName` で分岐する。Cognito グループの作成・所属変更は Admin API
   でしか行えないため、これらは Lambda でなければ実装できない
 - `storage/resource.ts` — レシピ画像の S3 バケット（`docs/design.md §7.1`）。
-  アクセスルールは `allow.resource(teamFunction)` のみで、**クライアントには
-  S3 を一切触らせない**。Storage のアクセスルールは動的な teamId グループを
-  表現できないため、Lambda が「key の teamId とグループ所属の突き合わせ」を
-  行ってから署名付き URL を発行する。この形を `allow.authenticated` 等に
-  緩めないこと。`keepOnDelete: true` はテーブルの削除保護と同方針
-  （sandbox は設定に関係なく常に削除される）
+  **クライアントには S3 を一切触らせない**。Storage のアクセスルールは動的な
+  teamId グループを表現できないため、Lambda が「key の teamId とグループ
+  所属の突き合わせ」を行ってから署名付き URL を発行する。アクセスルールを
+  `allow.authenticated` 等に緩めないこと。Lambda への権限付与は
+  `allow.resource` ではなく `backend.ts` の専用スタック `MediaBucketAccess`
+  で行う（allow.resource 経由の環境変数は data ハンドラ兼用の関数では
+  Lambda に載らないことを CI で確認済み）。`keepOnDelete: true` は
+  テーブルの削除保護と同方針（sandbox は設定に関係なく常に削除される）
 - `auth/post-confirmation/` — サインアップ確認後に「個人チーム」を作る。
   全ユーザーは常に何らかのチームに属し、「個人」はメンバー1人のチームとして
   表現される（専用の概念は無い）。チーム生成の共通処理は `shared/personal-team.ts`

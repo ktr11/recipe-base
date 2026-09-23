@@ -26,13 +26,14 @@ import { type Caller, currentTeamId } from './context';
 
 const s3 = new S3Client();
 
-// バケット名は storage の access ルール（allow.resource）が環境変数で渡す。
-// 変数名は defineStorage の name をそのまま使った `<name>_BUCKET_NAME`。
+// バケット名は backend.ts が addEnvironment で渡す（§7.1）。storage の
+// access ルール由来の media_BUCKET_NAME（SSM 経由で実行時解決）は、data の
+// ハンドラを兼ねる関数では Lambda に載らないことを CI で確認したため使わない。
 // $amplify/env の生成型はデプロイ後にしか更新されないため process.env で読む。
 const bucketName = (): string => {
-  const name = process.env.media_BUCKET_NAME;
+  const name = process.env.MEDIA_BUCKET_NAME;
   if (!name) {
-    throw new Error('media_BUCKET_NAME が設定されていません');
+    throw new Error('MEDIA_BUCKET_NAME が設定されていません');
   }
   return name;
 };

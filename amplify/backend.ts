@@ -109,6 +109,44 @@ backend.teamFunction.addEnvironment(
 );
 
 /**
+ * teamFunction に画像バケットへのアクセスを与える（docs/design.md §7.1）
+ *
+ * defineStorage の access ルール（allow.resource）を使わないのは意図的。
+ * あの経路の環境変数（media_BUCKET_NAME）は SSM 経由で実行時に解決される
+ * 仕組みだが、data のカスタムミューテーションのハンドラを兼ねる関数では
+ * Lambda に載らないことを CI で確認した。ここでは CognitoGroupAccess と
+ * 同じパターンで、専用スタックの明示的なポリシーと addEnvironment に倒す。
+ * どちらも参照が一方向（policy → storage / function、function → storage）
+ * なので循環は生じない。
+ *
+ * s3:* は付与しない。署名付き URL の発行・削除・移送・チーム解散時の
+ * 一括削除に必要な操作を、media/ プレフィックスに限定して与える。
+ */
+const mediaBucket = backend.storage.resources.bucket;
+const mediaAccessStack = backend.createStack('MediaBucketAccess');
+
+const mediaBucketPolicy = new Policy(mediaAccessStack, 'MediaBucketAccess', {
+  statements: [
+    new PolicyStatement({
+      sid: 'AllowMediaObjectAccess',
+      actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+      resources: [`${mediaBucket.bucketArn}/media/*`],
+    }),
+    new PolicyStatement({
+      // deleteTeamImages（チーム解散）がプレフィックス配下を列挙するのに使う
+      sid: 'AllowMediaListing',
+      actions: ['s3:ListBucket'],
+      resources: [mediaBucket.bucketArn],
+      conditions: { StringLike: { 's3:prefix': ['media/*'] } },
+    }),
+  ],
+});
+
+mediaBucketPolicy.attachToRole(backend.teamFunction.resources.lambda.role!);
+
+backend.teamFunction.addEnvironment('MEDIA_BUCKET_NAME', mediaBucket.bucketName);
+
+/**
  * DynamoDB テーブルの保護（docs/design.md §11.7）
  *
  * 線を「prod かどうか」ではなく「sandbox かどうか」で引く。dev と prod は
