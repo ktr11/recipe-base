@@ -23,6 +23,7 @@ export const recipeInput = (overrides: Partial<RecipeInput> = {}): RecipeInput =
   ingredients: [],
   labelIds: [],
   memo: null,
+  imageKey: null,
   ...overrides,
 });
 

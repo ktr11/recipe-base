@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import RecipeForm from '@/components/recipes/RecipeForm';
+import RecipeImage from '@/components/recipes/RecipeImage';
+import { useImageUrls } from '@/hooks/use-image-urls';
 import { useRecipes } from '@/hooks/use-recipes';
 import { resolveLabels } from '@/lib/recipes/labels';
 import {
@@ -24,6 +26,8 @@ export default function RecipeDetailPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [servings, setServings] = useState<number | null>(null);
+
+  const { imageUrls, refreshImageUrl } = useImageUrls([recipe?.imageKey ?? null]);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +75,7 @@ export default function RecipeDetailPage() {
             ingredients: recipe.ingredients,
             labelIds: recipe.labelIds,
             memo: recipe.memo,
+            imageKey: recipe.imageKey,
           }}
           onSubmit={async (input) => {
             const repo = await getRepository();
@@ -87,6 +92,11 @@ export default function RecipeDetailPage() {
   const handleDelete = async () => {
     const repo = await getRepository();
     await repo.deleteRecipe(recipe.id);
+    // 画像の後始末はベストエフォート。失敗しても孤児が残るだけで、
+    // チーム解散時の一括削除が最終的に拾う（§7.1）
+    if (recipe.imageKey) {
+      void repo.deleteImage(recipe.imageKey).catch(() => {});
+    }
     await reload();
     router.push('/recipes');
   };
@@ -102,6 +112,16 @@ export default function RecipeDetailPage() {
           </span>
         ))}
       </div>
+
+      {recipe.imageKey && (
+        <figure className="mt-4 aspect-[4/3] w-full overflow-hidden rounded-box">
+          <RecipeImage
+            url={imageUrls.get(recipe.imageKey)}
+            alt={recipe.title}
+            onExpired={() => void refreshImageUrl(recipe.imageKey as string)}
+          />
+        </figure>
+      )}
 
       {recipe.url && (
         <a

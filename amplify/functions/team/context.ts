@@ -33,6 +33,13 @@ export type Caller = {
   userId: string;
   cognitoUsername: string;
   email?: string;
+  /**
+   * ID トークン由来のグループ所属（＝チーム）。画像操作の認可判定に使う。
+   * Admin API を呼ばずにトークンの主張をそのまま使えるのは、グループの
+   * 付け替えが本 Lambda 自身の責務であり、トークンが古い場合は Data 側の
+   * groupDefinedIn も同様に失敗して整合するため。
+   */
+  groups: string[];
 };
 
 /**
@@ -56,6 +63,7 @@ export const callerFrom = (identity: unknown): Caller => {
   const typed = identity as {
     sub: string;
     username: string;
+    groups?: string[] | null;
     claims?: Record<string, unknown>;
   };
 
@@ -63,6 +71,7 @@ export const callerFrom = (identity: unknown): Caller => {
     userId: typed.sub,
     cognitoUsername: typed.username,
     email: typed.claims?.email as string | undefined,
+    groups: typed.groups ?? [],
   };
 };
 

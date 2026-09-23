@@ -27,4 +27,23 @@ export interface RecipeRepository {
    * 責務として契約に含める。レシピ自体は削除しない。
    */
   deleteLabel(id: string): Promise<void>;
+
+  /**
+   * 画像の対応可否（§7.1）。画像は認証ユーザー限定で、ゲスト（localStorage）
+   * には保存先が無い。画面はこのフラグだけを見てアップロード UI を出し分け、
+   * 「ゲストだから」という理由は Repository の外に漏らさない。
+   */
+  readonly supportsImages: boolean;
+  /** 画像を保存し、レシピに持たせる imageKey を返す。supportsImages が false なら失敗する */
+  uploadImage(image: Blob): Promise<string>;
+  /**
+   * 表示用 URL をまとめて取得する。戻りは imageKey → URL の対応。
+   * URL は署名付きで短命（最大1時間）のため、保存せず表示のたびに取得する
+   */
+  getImageUrls(imageKeys: string[]): Promise<Map<string, string>>;
+  /**
+   * 画像を削除する。差し替え・レシピ削除時の後始末としてベストエフォートで
+   * 呼ばれ、失敗しても孤児が残るだけで整合性は壊れない（§7.1）
+   */
+  deleteImage(imageKey: string): Promise<void>;
 }
