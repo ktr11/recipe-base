@@ -31,6 +31,11 @@ export type Recipe = {
    */
   labelIds: string[];
   memo: string | null;
+  /**
+   * レシピ画像の S3 キー（media/<teamId>/<uuid>.jpg）。画像なしは null。
+   * 画像は認証ユーザー限定のため、ゲストのデータでは常に null（§7.1）
+   */
+  imageKey: string | null;
   /** 一覧の既定の並び順に使う（§6.6） */
   updatedAt: string;
 };
@@ -50,4 +55,5 @@ export const emptyRecipeInput = (): RecipeInput => ({
   ingredients: [],
   labelIds: [],
   memo: null,
+  imageKey: null,
 });

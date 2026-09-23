@@ -71,6 +71,7 @@ export default function RecipeDetailPage() {
             ingredients: recipe.ingredients,
             labelIds: recipe.labelIds,
             memo: recipe.memo,
+            imageKey: recipe.imageKey,
           }}
           onSubmit={async (input) => {
             const repo = await getRepository();

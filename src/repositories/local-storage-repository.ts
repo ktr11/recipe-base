@@ -96,6 +96,26 @@ export class LocalStorageRepository implements RecipeRepository {
     return label;
   }
 
+  /**
+   * 画像は認証ユーザー限定（§7.1）。localStorage は容量が実質 5MB 程度で
+   * 写真を置く先にならず、ゲストはお試し利用（レシピ3件まで）のため
+   * ローカル専用の画像保存層も持たない。
+   */
+  readonly supportsImages = false;
+
+  async uploadImage(): Promise<string> {
+    throw new Error('ゲストは画像を保存できません。無料登録すると利用できます。');
+  }
+
+  async getImageUrls(): Promise<Map<string, string>> {
+    // ゲストのレシピは imageKey を持たないため、対応表は常に空
+    return new Map();
+  }
+
+  async deleteImage(): Promise<void> {
+    // 消す対象が存在しないため何もしない
+  }
+
   async deleteLabel(id: string): Promise<void> {
     const labels = readLabels();
     writeLabels(labels.filter((l) => l.id !== id));
