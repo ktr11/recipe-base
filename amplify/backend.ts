@@ -4,12 +4,14 @@ import { auth } from './auth/resource';
 import { postConfirmation } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
 import { teamFunction } from './functions/team/resource';
+import { storage } from './storage/resource';
 
 const backend = defineBackend({
   auth,
   data,
   postConfirmation,
   teamFunction,
+  storage,
 });
 
 const { cfnUserPool, cfnIdentityPool } = backend.auth.resources.cfnResources;
