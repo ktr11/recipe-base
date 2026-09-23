@@ -1,12 +1,16 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import RecipeImage from '@/components/recipes/RecipeImage';
+import { useImageUrls } from '@/hooks/use-image-urls';
 import { useTrialLimits } from '@/hooks/use-trial-limits';
+import { resizeToJpeg } from '@/lib/images/resize';
 import { isTrialLimitError } from '@/lib/recipes/limits';
 import { MAX_SERVINGS, MIN_SERVINGS } from '@/lib/recipes/scaling';
 import type { Ingredient, Label, RecipeInput } from '@/lib/recipes/types';
 import { emptyRecipeInput } from '@/lib/recipes/types';
+import { getRepository } from '@/repositories';
 
 /** 単位の候補。一覧に無い単位も入力できる（datalist は候補提示のみ、§6.4） */
 const UNIT_SUGGESTIONS = [
@@ -32,6 +36,44 @@ export default function RecipeForm({
   const [saving, setSaving] = useState(false);
   const limits = useTrialLimits({ recipes: 0, labels: 0 });
 
+  // 画像の対応可否は Repository だけが知っている（§7.1）。ゲストには
+  // アップロード欄の代わりに案内を出すため、判定が済むまで欄自体を出さない
+  const [imageSupported, setImageSupported] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    void getRepository().then((repo) => {
+      if (active) setImageSupported(repo.supportsImages);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 選択済み・未保存の画像。アップロードは保存ボタン押下時に行う（§7.1）。
+  // 途中でフォームを離れても S3 に孤児オブジェクトが残らない
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
+  // input type=file は値をプログラムから消せないため、key を変えて作り直す
+  const [fileInputKey, setFileInputKey] = useState(0);
+
+  const { imageUrls } = useImageUrls([input.imageKey]);
+
+  // 未保存の選択はローカルの Blob URL で即座にプレビューする
+  const pendingPreviewUrl = useMemo(
+    () => (pendingImage ? URL.createObjectURL(pendingImage) : null),
+    [pendingImage],
+  );
+  useEffect(() => {
+    return () => {
+      if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+    };
+  }, [pendingPreviewUrl]);
+
+  const currentImageUrl =
+    !imageRemoved && input.imageKey ? imageUrls.get(input.imageKey) : undefined;
+  const previewUrl = pendingPreviewUrl ?? currentImageUrl;
+  const hasImage = pendingImage !== null || (!imageRemoved && input.imageKey !== null);
+
   const ingredientLimitReached = limits.ingredientsPerRecipe.reachedAt(
     input.ingredients.length,
   );
@@ -51,12 +93,38 @@ export default function RecipeForm({
     event.preventDefault();
     setError(null);
     setSaving(true);
+
+    // 画像を先に確定させる。縮小してアップロードし、成功した imageKey だけを
+    // レシピに持たせる（§7.1）。レシピ保存が後で失敗すると孤児が残り得るが許容する
+    let imageKey = imageRemoved ? null : input.imageKey;
+    if (pendingImage) {
+      try {
+        const repo = await getRepository();
+        imageKey = await repo.uploadImage(await resizeToJpeg(pendingImage));
+      } catch {
+        setError('画像を保存できませんでした。別の画像でお試しください。');
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
       // 名前が空の材料行は保存しない
       await onSubmit({
         ...input,
+        imageKey,
         ingredients: input.ingredients.filter((i) => i.name.trim() !== ''),
       });
+
+      // 差し替え・取り外しで不要になった旧画像の後始末。ベストエフォートで、
+      // 失敗しても孤児が残るだけなので保存の成功は覆さない（§7.1）
+      const previousKey = initial?.imageKey ?? null;
+      if (previousKey && previousKey !== imageKey) {
+        void getRepository().then(
+          (repo) => repo.deleteImage(previousKey).catch(() => {}),
+        );
+      }
+
       router.push('/recipes');
     } catch (caught) {
       // 入口で止めているため通常ここには来ない。保険としての表示（§4.3）
@@ -98,6 +166,54 @@ export default function RecipeForm({
           onChange={(e) => patch({ url: e.target.value || null })}
         />
       </fieldset>
+
+      {imageSupported !== null && (
+        <fieldset className="fieldset">
+          <legend className="fieldset-legend">画像（任意）</legend>
+          {imageSupported === false ? (
+            // ゲストの画像はスコープ外（§7.1）。案内だけを出す
+            <p className="label">画像の保存は、無料登録すると利用できます</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {hasImage && (
+                <div className="aspect-[4/3] w-full max-w-xs overflow-hidden rounded-box">
+                  <RecipeImage url={previewUrl} alt="レシピ画像のプレビュー" />
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  key={fileInputKey}
+                  type="file"
+                  accept="image/*"
+                  className="file-input"
+                  aria-label="画像を選択"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    if (file) {
+                      setPendingImage(file);
+                      setImageRemoved(false);
+                    }
+                  }}
+                />
+                {hasImage && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setPendingImage(null);
+                      setImageRemoved(true);
+                      setFileInputKey((key) => key + 1);
+                    }}
+                  >
+                    画像を削除
+                  </button>
+                )}
+              </div>
+              <p className="label">保存時に縮小してアップロードします</p>
+            </div>
+          )}
+        </fieldset>
+      )}
 
       <fieldset className="fieldset">
         <legend className="fieldset-legend">基準の人数</legend>

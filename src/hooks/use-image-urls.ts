@@ -24,7 +24,7 @@ export const useImageUrls = (imageKeys: (string | null)[]) => {
   useEffect(() => {
     let active = true;
     if (signature === '') {
-      setUrls(new Map());
+      // 取得するものが無い。既存の対応表が残っていても、参照されないだけで害は無い
       return;
     }
     void (async () => {
