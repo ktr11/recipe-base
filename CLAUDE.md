@@ -1,5 +1,9 @@
 @AGENTS.md
 
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # recipe-base
 
 レシピ保存・家族共有アプリ。Next.js（App Router）+ AWS Amplify Gen 2。
@@ -34,6 +38,71 @@
 `Team` / `Recipe` / `Label` / `UserProfile` の4モデルすべてが同じ
 `allow.groupDefinedIn('teamId')` を使う。**認可ルールを分岐させないこと。**
 所有者ベースの認可とグループ認可を混在させた時点で、この設計は壊れる。
+
+## コマンド
+
+| コマンド | 内容 |
+|---|---|
+| `pnpm dev` | 開発サーバー（http://localhost:3000） |
+| `pnpm build` | 本番ビルド（TypeScript の型検査を含む） |
+| `pnpm lint` | ESLint |
+| `pnpm test` | 単体テスト（AWS 不要、jsdom） |
+| `pnpm test src/lib/recipes/search.test.ts` | 単体テストを1ファイルだけ実行 |
+| `pnpm test:integration` | 認可の統合テスト（デプロイ済み sandbox が必要） |
+| `pnpm exec tsc --noEmit -p amplify/tsconfig.json` | バックエンドの型検査 |
+| `pnpm exec ampx sandbox` | バックエンドをサンドボックスへデプロイ（**AWS リソースを作成するため実行前に確認を取ること**） |
+
+## アーキテクチャ
+
+### 全体像
+
+- フロントエンドは `src/app/`（App Router）。バックエンドは `amplify/` 配下の
+  TypeScript（Amplify Gen 2）からすべてプロビジョニングする。CloudFormation の
+  直接編集や AWS コンソールでの手動構築はしない
+- `amplify_outputs.json` は `ampx sandbox` が生成する接続情報で Git 管理外。
+  フロントエンドが静的インポートするため、無いとビルドが落ちる。AWS 認証情報の
+  無い CI では `scripts/ensure-amplify-outputs.mjs` がビルド用プレースホルダを置く
+  （ビルドを通すだけで、その設定でアプリは動かない）
+
+### バックエンド（`amplify/`）
+
+- `data/resource.ts` — 4モデル（`Team` / `Recipe` / `Label` / `UserProfile`）と
+  4カスタムミューテーション（`repairAccount` / `issueInviteCode` / `joinTeam` /
+  `leaveTeam`）。Cognito グループ名は `teamId` の値そのものであり、`Team` は
+  `teamId` を主キーにして自動採番の `id` を使わない
+- カスタムミューテーションは **1つの Lambda**（`functions/team/handler.ts`）に
+  集約し、`fieldName` で分岐する。Cognito グループの作成・所属変更は Admin API
+  でしか行えないため、これらは Lambda でなければ実装できない
+- `auth/post-confirmation/` — サインアップ確認後に「個人チーム」を作る。
+  全ユーザーは常に何らかのチームに属し、「個人」はメンバー1人のチームとして
+  表現される（専用の概念は無い）。チーム生成の共通処理は `shared/personal-team.ts`
+- `backend.ts` — `defineAuth` / `defineData` で表現できない細部を CDK で直接設定
+  （パスワードポリシー、未認証 Identity の無効化、グループ操作の IAM ポリシー、
+  テーブルの削除保護）。グループ操作ポリシーは循環依存回避のため専用スタック
+  `CognitoGroupAccess` に置いてある — auth スタック側に戻さないこと。
+  テーブルの削除保護は sandbox 以外にのみ掛ける（sandbox に掛けると CI の
+  使い捨て環境の破棄が失敗して環境が残り続ける）
+
+### フロントエンド（`src/`）
+
+- **Repository パターンが中心。** 画面コンポーネントは
+  `getRepository()`（`src/repositories/index.ts`）の戻り値だけを見る。
+  認証済みなら `AmplifyRepository`（DynamoDB）、ゲストなら
+  `LocalStorageRepository`。保存先の分岐はこの1箇所に閉じており、
+  画面側にデータの保存先を意識させないこと
+- ゲスト→正規ユーザーのデータ引き継ぎは `src/lib/migration/`。新規登録時に
+  localStorage の内容を DynamoDB へ移す
+- ルート保護は `src/middleware.ts` で `/team` のみ。他のページはゲストも使う
+  ため、middleware を広く掛けてはならない
+- サインイン後に `UserProfile` が無い場合は `repairAccount` を呼んで自己修復する
+  （`postConfirmation` 失敗の救済。`docs/design.md §2.7`）
+
+### テスト構成
+
+- 単体テスト: `src/**/*.test.ts` と `tests/unit/`。ローカル完結で AWS 不要
+- 統合テスト: `tests/integration/`。デプロイ済み sandbox に対して実ユーザーの
+  作成・サインインを伴うため、直列実行・長タイムアウトの別設定
+  （`vitest.integration.config.ts`）になっている。単体テストと混ぜないこと
 
 ## 作業の進め方
 
