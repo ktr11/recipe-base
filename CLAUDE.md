@@ -51,6 +51,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `pnpm test:integration` | 認可の統合テスト（デプロイ済み sandbox が必要） |
 | `pnpm exec tsc --noEmit -p amplify/tsconfig.json` | バックエンドの型検査 |
 | `pnpm exec ampx sandbox` | バックエンドをサンドボックスへデプロイ（**AWS リソースを作成するため実行前に確認を取ること**） |
+| `node scripts/create-dev-user.mjs <名前>` | 確認済みの開発用ユーザーを sandbox に作成（ローカルの AWS 資格情報が必要。ユーザー自身が実行する） |
 
 ## アーキテクチャ
 
