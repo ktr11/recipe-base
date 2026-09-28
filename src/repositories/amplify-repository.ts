@@ -65,6 +65,7 @@ const toRecipe = (model: RecipeModel): Recipe => ({
   // 配列内の null は型の都合で生じ得るのでここで落としておく
   labelIds: (model.labelIds ?? []).filter((id): id is string => id != null),
   memo: model.memo ?? null,
+  imageKey: model.imageKey ?? null,
   updatedAt: model.updatedAt,
 });
 
@@ -81,6 +82,7 @@ const writeFields = (input: RecipeInput) => ({
   ingredients: input.ingredients,
   labelIds: input.labelIds,
   memo: input.memo,
+  imageKey: input.imageKey,
 });
 
 type Page<T> = {
@@ -170,6 +172,46 @@ export class AmplifyRepository implements RecipeRepository {
     const { data, errors } = await getClient().models.Label.create({ teamId, name });
     throwOnErrors(errors);
     return toLabel(mustExist(data, 'ラベルの作成'));
+  }
+
+  readonly supportsImages = true;
+
+  async uploadImage(image: Blob): Promise<string> {
+    // S3 には直接触れない。teamFunction が発行する署名付き URL に PUT する（§7.1）
+    const { data, errors } = await getClient().mutations.getImageUploadUrl();
+    throwOnErrors(errors);
+    const target = mustExist(data, 'アップロード先の取得');
+
+    const response = await fetch(target.url, {
+      method: 'PUT',
+      body: image,
+      // 署名に ContentType が含まれるため、一致させないと拒否される
+      headers: { 'Content-Type': 'image/jpeg' },
+    });
+    if (!response.ok) {
+      throw new Error(`画像のアップロードに失敗しました (${response.status})`);
+    }
+    return target.key;
+  }
+
+  async getImageUrls(imageKeys: string[]): Promise<Map<string, string>> {
+    if (imageKeys.length === 0) {
+      return new Map();
+    }
+    const { data, errors } = await getClient().queries.getImageViewUrls({
+      keys: imageKeys,
+    });
+    throwOnErrors(errors);
+    return new Map(
+      (data ?? [])
+        .filter((entry): entry is NonNullable<typeof entry> => entry != null)
+        .map((entry) => [entry.key, entry.url]),
+    );
+  }
+
+  async deleteImage(imageKey: string): Promise<void> {
+    const { errors } = await getClient().mutations.deleteImage({ key: imageKey });
+    throwOnErrors(errors);
   }
 
   async deleteLabel(id: string): Promise<void> {

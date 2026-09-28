@@ -202,6 +202,48 @@ const schema = a.schema({
     .returns(a.ref('LeaveTeamResult'))
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(teamFunction)),
+
+  /**
+   * レシピ画像の署名付き URL（§7.1）
+   *
+   * ⚠️ Lambda でなければ実装できない。Storage のアクセスルールは動的な
+   * teamId グループを表現できないため、クライアントは S3 に直接触れない。
+   * Lambda が「呼び出し元が key の teamId グループに所属しているか」を
+   * 検証してから URL を発行する。中心規則の S3 への延長がこの検証になる。
+   *
+   * キーの形式は media/<teamId>/<uuid>.jpg。採番は Lambda が行い、
+   * クライアントはアップロード先のキーを選べない。
+   */
+  ImagePresignedUrl: a.customType({
+    key: a.string().required(),
+    url: a.string().required(),
+  }),
+
+  /** アップロード用（PUT）の URL を発行する。キーは呼び出し元の現チームに採番する */
+  getImageUploadUrl: a
+    .mutation()
+    .returns(a.ref('ImagePresignedUrl'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
+
+  /** 閲覧用（GET）の URL をまとめて発行する。一覧画面が1回で全件分を取るため配列で受ける */
+  getImageViewUrls: a
+    .query()
+    .arguments({ keys: a.string().required().array().required() })
+    .returns(a.ref('ImagePresignedUrl').required().array())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
+
+  /**
+   * 画像の削除。差し替え・レシピ削除時にクライアントがベストエフォートで呼ぶ。
+   * 呼び忘れや失敗で孤児オブジェクトが残ることは許容する（§7.1）。
+   */
+  deleteImage: a
+    .mutation()
+    .arguments({ key: a.string().required() })
+    .returns(a.boolean())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(teamFunction)),
 })
   // バックエンドの Lambda にデータアクセスを許可する。
   // モデル単位ではなくスキーマ全体に付ける API である点に注意。

@@ -57,6 +57,8 @@ export const migrateGuestData = async (
         .map((id) => idMap.get(id))
         .filter((id): id is string => id !== undefined),
       memo: recipe.memo,
+      // 画像は認証ユーザー限定のため、ゲストのデータには存在しない（§7.1）
+      imageKey: null,
     });
     store.markRecipeMigrated(recipe.id);
   }

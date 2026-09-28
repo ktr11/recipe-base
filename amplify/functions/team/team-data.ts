@@ -5,6 +5,7 @@ import {
   DeleteGroupCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { client, cognito, unwrap, userPoolId } from './context';
+import { copyImageToTeam, deleteImageQuietly, deleteTeamImages } from './images';
 
 /**
  * チームに紐づくデータの操作（docs/design.md §2.5 / §2.6）
@@ -53,10 +54,19 @@ const teamLabels = (teamId: string) =>
  */
 export const moveTeamData = async (from: string, to: string): Promise<void> => {
   for (const recipe of await teamRecipes(from)) {
+    // 画像はキーに teamId を含むため、レコードと一緒に移送する（§7.1）。
+    // 「コピー → レコード更新 → 旧オブジェクト削除」の順を守る。途中で
+    // 失敗しても再実行でコピーが上書きされるだけで、参照が壊れることはない
+    const imageKey = recipe.imageKey
+      ? await copyImageToTeam(recipe.imageKey, to)
+      : recipe.imageKey;
     unwrap(
-      await client.models.Recipe.update({ id: recipe.id, teamId: to }),
+      await client.models.Recipe.update({ id: recipe.id, teamId: to, imageKey }),
       'レシピの移送',
     );
+    if (recipe.imageKey) {
+      await deleteImageQuietly(recipe.imageKey);
+    }
   }
   for (const label of await teamLabels(from)) {
     unwrap(
@@ -74,6 +84,9 @@ export const deleteTeamData = async (teamId: string): Promise<void> => {
   for (const label of await teamLabels(teamId)) {
     unwrap(await client.models.Label.delete({ id: label.id }), 'ラベルの削除');
   }
+  // レコード単位ではなくプレフィックスごと消す。ベストエフォート削除の
+  // 取りこぼし（孤児）もこのタイミングで一掃する（§7.1）
+  await deleteTeamImages(teamId);
 };
 
 /**

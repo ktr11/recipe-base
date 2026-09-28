@@ -26,6 +26,7 @@ const storedRecipe = (overrides: Partial<StoredRecipe> = {}): StoredRecipe => ({
   ingredients: [],
   labelIds: [],
   memo: null,
+  imageKey: null,
   updatedAt: '2026-01-01T00:00:00.000Z',
   ...overrides,
 });
@@ -112,6 +113,14 @@ class FakeRepository implements RecipeRepository {
     return this.labels;
   }
   async deleteLabel(): Promise<void> {}
+  readonly supportsImages = true;
+  async uploadImage(): Promise<string> {
+    throw new Error('使用しない');
+  }
+  async getImageUrls(): Promise<Map<string, string>> {
+    return new Map();
+  }
+  async deleteImage(): Promise<void> {}
 }
 
 describe('migrateGuestData', () => {
