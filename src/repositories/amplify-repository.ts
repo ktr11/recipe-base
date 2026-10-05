@@ -214,6 +214,12 @@ export class AmplifyRepository implements RecipeRepository {
     throwOnErrors(errors);
   }
 
+  async updateLabel(id: string, name: string): Promise<Label> {
+    const { data, errors } = await getClient().models.Label.update({ id, name });
+    throwOnErrors(errors);
+    return toLabel(mustExist(data, 'ラベルの更新'));
+  }
+
   async deleteLabel(id: string): Promise<void> {
     const { errors } = await getClient().models.Label.delete({ id });
     throwOnErrors(errors);
