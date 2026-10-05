@@ -116,6 +116,18 @@ export class LocalStorageRepository implements RecipeRepository {
     // 消す対象が存在しないため何もしない
   }
 
+  async updateLabel(id: string, name: string): Promise<Label> {
+    // 名前の変更は件数を増やさないため、トライアル制限の検査は不要
+    const labels = readLabels();
+    const index = labels.findIndex((l) => l.id === id);
+    if (index === -1) {
+      throw new Error(`ラベルが見つかりません: ${id}`);
+    }
+    labels[index] = { ...labels[index], name };
+    writeLabels(labels);
+    return { id, name };
+  }
+
   async deleteLabel(id: string): Promise<void> {
     const labels = readLabels();
     writeLabels(labels.filter((l) => l.id !== id));

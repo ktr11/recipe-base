@@ -144,6 +144,30 @@ export const describeRecipeRepositoryContract = (
         expect(labels.map((l) => l.name)).toEqual(['主菜']);
       });
 
+      it('ラベル名を変更できる', async () => {
+        const label = await repo.createLabel('主菜');
+
+        await repo.updateLabel(label.id, '副菜');
+
+        const labels = await repo.listLabels();
+        expect(labels.map((l) => l.name)).toEqual(['副菜']);
+      });
+
+      it('ラベル名を変更しても id は変わらず、レシピからの参照が保たれる', async () => {
+        // レシピはラベルを ID で参照しているため（§1.4）、名前の変更で
+        // レシピ側のデータが変わらないことが、この操作が安全である根拠になる
+        const label = await repo.createLabel('主菜');
+        const created = await repo.createRecipe(
+          recipeInput({ labelIds: [label.id] }),
+        );
+
+        const updated = await repo.updateLabel(label.id, '副菜');
+
+        expect(updated.id).toBe(label.id);
+        const found = await repo.getRecipe(created.id);
+        expect(found?.labelIds).toEqual([label.id]);
+      });
+
       it('削除したラベルは一覧から消える', async () => {
         const label = await repo.createLabel('主菜');
 

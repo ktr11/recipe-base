@@ -112,6 +112,9 @@ class FakeRepository implements RecipeRepository {
   async listLabels(): Promise<Label[]> {
     return this.labels;
   }
+  async updateLabel(): Promise<Label> {
+    throw new Error('使用しない');
+  }
   async deleteLabel(): Promise<void> {}
   readonly supportsImages = true;
   async uploadImage(): Promise<string> {

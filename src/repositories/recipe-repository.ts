@@ -21,6 +21,13 @@ export interface RecipeRepository {
   listLabels(): Promise<Label[]>;
   createLabel(name: string): Promise<Label>;
   /**
+   * ラベル名を変更する。
+   *
+   * レシピはラベルを ID で参照しているため（§1.4）、名前の変更は
+   * レシピ側のデータに一切触れずに全レシピの表示へ反映される。
+   */
+  updateLabel(id: string, name: string): Promise<Label>;
+  /**
    * ラベルを削除し、そのラベルを参照している全レシピから ID を取り除く。
    *
    * 参照整合性は DB では担保されない（§1.4）ため、この後始末は実装の
